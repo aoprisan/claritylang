@@ -1,0 +1,74 @@
+-- Tail Recursion Examples
+-- @tailrec for self-recursion (compiled to while loops)
+-- @trampoline for mutual recursion (compiled to thunk bouncing)
+
+-- ─── Self-Recursion with @tailrec ───
+
+@purpose "Compute factorial using tail-recursive accumulator pattern"
+@example "factorial(5, 1) => 120"
+@tailrec
+define factorial(n: Number, acc: Number) -> Number as
+  if n <= 1 then
+    return acc
+  else
+    return factorial(n - 1, n * acc)
+  end
+end
+
+@purpose "Sum all elements of a list using tail recursion"
+@tailrec
+define sum_list(items: List<Number>, acc: Number) -> Number as
+  check items.length > 0 or return acc
+  head = items |> first
+  tail = items |> skip(1)
+  return sum_list(tail, acc + head)
+end
+
+@purpose "Find an element in a sorted list via binary search"
+@tailrec
+define binary_search(items: List<Number>, target: Number, low: Number, high: Number) -> Maybe<Number> as
+  check low <= high or return none
+
+  mid = (low + high) / 2
+  value = items[mid]
+
+  match true on
+    case value == target => return some(mid)
+    case value < target  => return binary_search(items, target, mid + 1, high)
+    case _               => return binary_search(items, target, low, mid - 1)
+  end
+end
+
+-- ─── Mutual Recursion with @trampoline ───
+
+@purpose "Check if a number is even via mutual recursion"
+@trampoline "is_even, is_odd"
+define is_even(n: Number) -> Boolean as
+  if n == 0 then
+    return true
+  else
+    return is_odd(n - 1)
+  end
+end
+
+@purpose "Check if a number is odd via mutual recursion"
+@trampoline "is_even, is_odd"
+define is_odd(n: Number) -> Boolean as
+  if n == 0 then
+    return false
+  else
+    return is_even(n - 1)
+  end
+end
+
+-- ─── What NOT to do (compiler will error) ───
+
+-- This would FAIL: recursive call is not in tail position
+-- @tailrec
+-- define bad_factorial(n: Number) -> Number as
+--   if n <= 1 then
+--     return 1
+--   else
+--     return n * bad_factorial(n - 1)   -- ERROR: wrapped in multiplication
+--   end
+-- end
