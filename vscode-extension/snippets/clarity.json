@@ -1,0 +1,130 @@
+{
+  "Function Definition": {
+    "prefix": "define",
+    "body": [
+      "define ${1:name}(${2:param}: ${3:Type}) -> ${4:ReturnType} as",
+      "  $0",
+      "end"
+    ],
+    "description": "Define a new function"
+  },
+  "Async Function Definition": {
+    "prefix": "adefine",
+    "body": [
+      "async define ${1:name}(${2:param}: ${3:Type}) -> ${4:Result<ReturnType, Error>} as",
+      "  $0",
+      "end"
+    ],
+    "description": "Define an async function"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} has",
+      "  ${2:field}: ${3:Type}",
+      "end"
+    ],
+    "description": "Define a struct"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} is",
+      "  ${2:Variant1}",
+      "  ${3:Variant2}",
+      "end"
+    ],
+    "description": "Define an enum"
+  },
+  "If-Then-Else": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} then",
+      "  $0",
+      "end"
+    ],
+    "description": "If-then block"
+  },
+  "If-Then-Else (with else)": {
+    "prefix": "ife",
+    "body": [
+      "if ${1:condition} then",
+      "  $2",
+      "else",
+      "  $0",
+      "end"
+    ],
+    "description": "If-then-else block"
+  },
+  "Match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:expr} on",
+      "  case ${2:pattern} => ${3:result}",
+      "  case _ => ${0:default}",
+      "end"
+    ],
+    "description": "Pattern matching block"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:collection} do",
+      "  $0",
+      "end"
+    ],
+    "description": "For-in loop"
+  },
+  "Check Guard": {
+    "prefix": "check",
+    "body": [
+      "check ${1:condition}",
+      "  or return ${0:error_value}"
+    ],
+    "description": "Check guard with error return"
+  },
+  "Pipeline": {
+    "prefix": "pipe",
+    "body": [
+      "${1:data}",
+      "  |> ${2:transform}",
+      "  |> ${0:collect}"
+    ],
+    "description": "Pipeline expression"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": [
+      "import ${1:Name} from \"${2:module}\""
+    ],
+    "description": "Import declaration"
+  },
+  "Purpose Annotation": {
+    "prefix": "@purpose",
+    "body": [
+      "@purpose \"${1:description}\""
+    ],
+    "description": "Purpose annotation"
+  },
+  "Invariant Annotation": {
+    "prefix": "@invariant",
+    "body": [
+      "@invariant \"${1:condition}\""
+    ],
+    "description": "Invariant annotation"
+  },
+  "Example Annotation": {
+    "prefix": "@example",
+    "body": [
+      "@example \"${1:usage}\""
+    ],
+    "description": "Example annotation"
+  },
+  "Type Alias": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Name} = ${0:Type}"
+    ],
+    "description": "Type alias"
+  }
+}
