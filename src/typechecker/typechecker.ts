@@ -11,6 +11,7 @@ import {
   Position,
   Parameter,
 } from "../parser/ast.js";
+import { suggest } from "../diagnostics/reporter.js";
 
 // ─── Type Representations ───
 
@@ -30,6 +31,7 @@ export type ClarityType =
 export interface TypeError {
   message: string;
   position: Position;
+  suggestion?: string;
 }
 
 // ─── Environment (scope chain) ───
@@ -511,9 +513,11 @@ export class TypeChecker {
           const expectedFields = new Set(struct.fields.map(f => f.name));
           for (const field of expr.fields) {
             if (!expectedFields.has(field.name)) {
+              const suggestion = suggest(field.name, [...expectedFields]);
               this.addError(
                 `Unknown field '${field.name}' in struct '${expr.typeName}'`,
                 expr.position,
+                suggestion,
               );
             }
             this.inferExpression(field.value, scope);
@@ -598,7 +602,14 @@ export class TypeChecker {
           !this.enums.has(type.name) &&
           !this.typeAliases.has(type.name)
         ) {
-          this.addError(`Unknown type '${type.name}'`, type.position);
+          const candidates = [
+            ...builtins,
+            ...this.structs.keys(),
+            ...this.enums.keys(),
+            ...this.typeAliases.keys(),
+          ];
+          const suggestion = suggest(type.name, candidates);
+          this.addError(`Unknown type '${type.name}'`, type.position, suggestion);
         }
         break;
       }
@@ -607,7 +618,9 @@ export class TypeChecker {
           "List", "Map", "Set", "Maybe", "Result",
         ]);
         if (!builtinGenerics.has(type.name) && !this.typeAliases.has(type.name)) {
-          this.addError(`Unknown generic type '${type.name}'`, type.position);
+          const candidates = [...builtinGenerics, ...this.typeAliases.keys()];
+          const suggestion = suggest(type.name, candidates);
+          this.addError(`Unknown generic type '${type.name}'`, type.position, suggestion);
         }
         for (const arg of type.typeArgs) {
           this.validateTypeNode(arg);
@@ -749,7 +762,7 @@ export class TypeChecker {
     }
   }
 
-  private addError(message: string, position: Position): void {
-    this.errors.push({ message, position });
+  private addError(message: string, position: Position, suggestion?: string): void {
+    this.errors.push({ message, position, suggestion });
   }
 }

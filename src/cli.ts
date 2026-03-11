@@ -12,9 +12,10 @@
 
 import { readFileSync, writeFileSync } from "fs";
 import { Lexer } from "./lexer/lexer.js";
-import { Parser } from "./parser/parser.js";
+import { Parser, ParseError } from "./parser/parser.js";
 import { TypeChecker } from "./typechecker/typechecker.js";
 import { TypeScriptEmitter } from "./emitter/typescript.js";
+import { formatDiagnostic, type Diagnostic } from "./diagnostics/reporter.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -41,20 +42,47 @@ function compile(sourcePath: string): string {
   const source = readFileSync(sourcePath, "utf-8");
   const lexer = new Lexer(source);
   const tokens = lexer.tokenize();
-  const parser = new Parser(tokens);
-  const ast = parser.parse();
+
+  let ast;
+  try {
+    const parser = new Parser(tokens);
+    ast = parser.parse();
+  } catch (err) {
+    if (err instanceof ParseError) {
+      const diagnostic: Diagnostic = {
+        message: err.message.replace(/^Parse error at \d+:\d+: /, ""),
+        position: err.position,
+        severity: "error",
+      };
+      throw new DiagnosticError(formatDiagnostic(source, diagnostic));
+    }
+    throw err;
+  }
 
   const checker = new TypeChecker();
   const typeErrors = checker.check(ast);
   if (typeErrors.length > 0) {
-    const messages = typeErrors.map(
-      (e) => `  ${e.position.line}:${e.position.column}: ${e.message}`
-    );
-    throw new Error(`Type errors:\n${messages.join("\n")}`);
+    const diagnostics: Diagnostic[] = typeErrors.map((e) => ({
+      message: e.message,
+      position: e.position,
+      severity: "error" as const,
+      suggestion: e.suggestion,
+    }));
+    const formatted = diagnostics
+      .map((d) => formatDiagnostic(source, d))
+      .join("\n\n");
+    throw new DiagnosticError(formatted);
   }
 
   const emitter = new TypeScriptEmitter();
   return emitter.emit(ast);
+}
+
+class DiagnosticError extends Error {
+  constructor(formatted: string) {
+    super(formatted);
+    this.name = "DiagnosticError";
+  }
 }
 
 switch (command) {
@@ -71,7 +99,11 @@ switch (command) {
         console.log(`Compiled ${file} → ${outPath}`);
       }
     } catch (err) {
-      console.error(`Compile error: ${(err as Error).message}`);
+      if (err instanceof DiagnosticError) {
+        console.error(err.message);
+      } else {
+        console.error(`Compile error: ${(err as Error).message}`);
+      }
       process.exit(1);
     }
     break;
@@ -82,7 +114,11 @@ switch (command) {
       compile(file);
       console.log(`${file}: OK`);
     } catch (err) {
-      console.error(`Check failed: ${(err as Error).message}`);
+      if (err instanceof DiagnosticError) {
+        console.error(err.message);
+      } else {
+        console.error(`Check failed: ${(err as Error).message}`);
+      }
       process.exit(1);
     }
     break;

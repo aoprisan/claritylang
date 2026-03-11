@@ -37,3 +37,12 @@ export { TypeChecker } from "./typechecker/typechecker.js";
 export type { TypeError, ClarityType } from "./typechecker/typechecker.js";
 
 export { TypeScriptEmitter } from "./emitter/typescript.js";
+
+export { ParseError } from "./parser/parser.js";
+export {
+  formatDiagnostic,
+  formatDiagnostics,
+  suggest,
+  levenshtein,
+} from "./diagnostics/reporter.js";
+export type { Diagnostic, Severity } from "./diagnostics/reporter.js";

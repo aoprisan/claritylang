@@ -1166,8 +1166,21 @@ export class Parser {
     return (expr as { position: Position }).position;
   }
 
-  private error(message: string): Error {
+  private error(message: string): ParseError {
     const token = this.current();
-    return new Error(`Parse error at ${token.line}:${token.column}: ${message}`);
+    return new ParseError(message, { line: token.line, column: token.column });
+  }
+}
+
+/**
+ * Structured parse error carrying position info for rich formatting.
+ */
+export class ParseError extends Error {
+  position: Position;
+
+  constructor(message: string, position: Position) {
+    super(`Parse error at ${position.line}:${position.column}: ${message}`);
+    this.name = "ParseError";
+    this.position = position;
   }
 }
