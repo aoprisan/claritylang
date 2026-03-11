@@ -1,4 +1,19 @@
-import { Program } from "../parser/ast.js";
+import {
+  Program,
+  FunctionDef,
+  Statement,
+  Expression,
+  TypeNode,
+} from "../parser/ast.js";
+import {
+  checkTailRecursion,
+  transformTailRecToLoop,
+} from "../typechecker/tailrec.js";
+import {
+  findTrampolineGroups,
+  validateTrampolineGroup,
+  transformTrampolineGroup,
+} from "../typechecker/trampoline.js";
 
 /**
  * Emits TypeScript code from a ClarityLang AST.
@@ -14,10 +29,443 @@ import { Program } from "../parser/ast.js";
  * - `Maybe<T>`                         →  `T | null`
  * - `check cond or return val`         →  `if (!cond) return val;`
  * - `match...on...end`                 →  switch or if-else chain
+ *
+ * Tail recursion:
+ * - `@tailrec` functions               →  while(true) loop with param reassignment
+ * - `@trampoline` function groups      →  thunk-returning functions + driver loop
  */
 export class TypeScriptEmitter {
+  private errors: string[] = [];
+
   emit(program: Program): string {
-    // TODO: Implement TypeScript emission
-    throw new Error("TypeScript emitter not yet implemented");
+    this.errors = [];
+    const chunks: string[] = [];
+
+    // Handle @trampoline groups first — they rewrite declarations
+    const trampolineGroups = findTrampolineGroups(program);
+    const trampolineFuncNames = new Set<string>();
+
+    for (const group of trampolineGroups) {
+      const validationErrors = validateTrampolineGroup(group);
+      if (validationErrors.length > 0) {
+        for (const err of validationErrors) {
+          this.errors.push(`${err.position.line}:${err.position.column}: ${err.message}`);
+        }
+        continue;
+      }
+
+      for (const func of group.functions) {
+        trampolineFuncNames.add(func.name);
+      }
+
+      // Emit the Thunk type helper once
+      chunks.push(
+        `type Thunk<T> = { done: false; fn: () => Thunk<T> } | { done: true; value: T };`
+      );
+      chunks.push("");
+
+      const { internalFunctions, wrapperFunctions } =
+        transformTrampolineGroup(group);
+
+      // Emit internal thunk-returning functions
+      for (const func of internalFunctions) {
+        chunks.push(this.emitTrampolineInternal(func));
+        chunks.push("");
+      }
+
+      // Emit public wrapper functions with trampoline loop
+      for (const func of wrapperFunctions) {
+        chunks.push(this.emitTrampolineWrapper(func));
+        chunks.push("");
+      }
+    }
+
+    // Emit remaining declarations
+    for (const decl of program.declarations) {
+      if (decl.kind === "FunctionDef" && trampolineFuncNames.has(decl.name)) {
+        continue; // Already handled by trampoline
+      }
+
+      if (decl.kind === "FunctionDef") {
+        chunks.push(this.emitFunctionDef(decl));
+        chunks.push("");
+      }
+      // TODO: Other declaration types when emitter is fully implemented
+    }
+
+    if (this.errors.length > 0) {
+      throw new Error(
+        `Tail recursion errors:\n${this.errors.join("\n")}`
+      );
+    }
+
+    return chunks.join("\n").trimEnd() + "\n";
+  }
+
+  emitFunctionDef(func: FunctionDef): string {
+    // Check @tailrec annotation
+    const tailRecResult = checkTailRecursion(func);
+    if (tailRecResult.errors.length > 0) {
+      for (const err of tailRecResult.errors) {
+        this.errors.push(`${err.position.line}:${err.position.column}: ${err.message}`);
+      }
+    }
+
+    let targetFunc = func;
+    if (tailRecResult.isTailRecursive) {
+      targetFunc = transformTailRecToLoop(func);
+    }
+
+    return this.emitFunction(targetFunc, tailRecResult.isTailRecursive);
+  }
+
+  private emitFunction(func: FunctionDef, isTailRecOptimized: boolean): string {
+    const params = func.params
+      .map((p) => `${p.name}: ${this.emitType(p.type)}`)
+      .join(", ");
+    const returnType = func.returnType
+      ? `: ${this.emitType(func.returnType)}`
+      : "";
+    const asyncPrefix = func.isAsync ? "async " : "";
+
+    const lines: string[] = [];
+    lines.push(`${asyncPrefix}function ${func.name}(${params})${returnType} {`);
+
+    if (isTailRecOptimized) {
+      // Emit as while(true) loop
+      lines.push("  while (true) {");
+      // The body is wrapped in a ForStatement sentinel — unwrap it
+      const loopBody =
+        func.body.length === 1 && func.body[0].kind === "ForStatement"
+          ? func.body[0].body
+          : func.body;
+      for (const stmt of loopBody) {
+        lines.push(this.emitStatement(stmt, 4));
+      }
+      lines.push("  }");
+    } else {
+      for (const stmt of func.body) {
+        lines.push(this.emitStatement(stmt, 2));
+      }
+    }
+
+    lines.push("}");
+    return lines.join("\n");
+  }
+
+  private emitTrampolineInternal(func: FunctionDef): string {
+    const params = func.params
+      .map((p) => `${p.name}: ${this.emitType(p.type)}`)
+      .join(", ");
+    const returnType = func.returnType
+      ? `Thunk<${this.emitType(func.returnType)}>`
+      : "Thunk<void>";
+
+    const lines: string[] = [];
+    lines.push(`function ${func.name}(${params}): ${returnType} {`);
+
+    for (const stmt of func.body) {
+      lines.push(this.emitTrampolineStatement(stmt, 2));
+    }
+
+    lines.push("}");
+    return lines.join("\n");
+  }
+
+  private emitTrampolineWrapper(func: FunctionDef): string {
+    const originalName = func.name;
+    const internalName = `_trampoline_${originalName}`;
+    const params = func.params
+      .map((p) => `${p.name}: ${this.emitType(p.type)}`)
+      .join(", ");
+    const argNames = func.params.map((p) => p.name).join(", ");
+    const returnType = func.returnType
+      ? `: ${this.emitType(func.returnType)}`
+      : "";
+
+    const lines: string[] = [];
+    lines.push(`function ${originalName}(${params})${returnType} {`);
+    lines.push(`  let __result: Thunk<${func.returnType ? this.emitType(func.returnType) : "void"}> = ${internalName}(${argNames});`);
+    lines.push("  while (!__result.done) {");
+    lines.push("    __result = __result.fn();");
+    lines.push("  }");
+    lines.push("  return __result.value;");
+    lines.push("}");
+    return lines.join("\n");
+  }
+
+  private emitTrampolineStatement(stmt: Statement, indent: number): string {
+    const pad = " ".repeat(indent);
+
+    switch (stmt.kind) {
+      case "ReturnStatement": {
+        const expr = stmt.value;
+        // Check if the return value is a thunk construct
+        if (
+          expr.kind === "ConstructExpr" &&
+          expr.typeName === "__TrampolineThunk"
+        ) {
+          const fnField = expr.fields.find((f) => f.name === "fn");
+          if (fnField) {
+            return `${pad}return { done: false, fn: ${this.emitExpression(fnField.value)} };`;
+          }
+        }
+        return `${pad}return { done: true, value: ${this.emitExpression(expr)} };`;
+      }
+
+      case "IfStatement": {
+        const lines: string[] = [];
+        lines.push(`${pad}if (${this.emitExpression(stmt.condition)}) {`);
+        for (const s of stmt.thenBlock) {
+          lines.push(this.emitTrampolineStatement(s, indent + 2));
+        }
+        for (const clause of stmt.elseIfClauses) {
+          lines.push(`${pad}} else if (${this.emitExpression(clause.condition)}) {`);
+          for (const s of clause.block) {
+            lines.push(this.emitTrampolineStatement(s, indent + 2));
+          }
+        }
+        if (stmt.elseBlock) {
+          lines.push(`${pad}} else {`);
+          for (const s of stmt.elseBlock) {
+            lines.push(this.emitTrampolineStatement(s, indent + 2));
+          }
+        }
+        lines.push(`${pad}}`);
+        return lines.join("\n");
+      }
+
+      default:
+        return this.emitStatement(stmt, indent);
+    }
+  }
+
+  emitStatement(stmt: Statement, indent: number): string {
+    const pad = " ".repeat(indent);
+
+    switch (stmt.kind) {
+      case "ReturnStatement":
+        return `${pad}return ${this.emitExpression(stmt.value)};`;
+
+      case "Assignment":
+        return `${pad}let ${stmt.target} = ${this.emitExpression(stmt.value)};`;
+
+      case "ExpressionStatement": {
+        // Check for __tailrec_continue sentinel
+        if (
+          stmt.expr.kind === "IdentifierExpr" &&
+          stmt.expr.name === "__tailrec_continue"
+        ) {
+          return `${pad}continue;`;
+        }
+        return `${pad}${this.emitExpression(stmt.expr)};`;
+      }
+
+      case "IfStatement": {
+        const lines: string[] = [];
+        lines.push(`${pad}if (${this.emitExpression(stmt.condition)}) {`);
+        for (const s of stmt.thenBlock) {
+          lines.push(this.emitStatement(s, indent + 2));
+        }
+        for (const clause of stmt.elseIfClauses) {
+          lines.push(
+            `${pad}} else if (${this.emitExpression(clause.condition)}) {`
+          );
+          for (const s of clause.block) {
+            lines.push(this.emitStatement(s, indent + 2));
+          }
+        }
+        if (stmt.elseBlock) {
+          lines.push(`${pad}} else {`);
+          for (const s of stmt.elseBlock) {
+            lines.push(this.emitStatement(s, indent + 2));
+          }
+        }
+        lines.push(`${pad}}`);
+        return lines.join("\n");
+      }
+
+      case "ForStatement":
+        return this.emitForStatement(stmt, indent);
+
+      case "MatchStatement": {
+        const lines: string[] = [];
+        // Emit as if-else chain
+        let first = true;
+        for (const matchCase of stmt.cases) {
+          const prefix = first ? "if" : "} else if";
+          first = false;
+          const cond = this.emitPatternCondition(
+            matchCase.pattern,
+            this.emitExpression(stmt.subject)
+          );
+          lines.push(`${pad}${prefix} (${cond}) {`);
+          if (Array.isArray(matchCase.body)) {
+            for (const s of matchCase.body) {
+              lines.push(this.emitStatement(s, indent + 2));
+            }
+          } else {
+            lines.push(`${pad}  ${this.emitExpression(matchCase.body)};`);
+          }
+        }
+        if (stmt.cases.length > 0) lines.push(`${pad}}`);
+        return lines.join("\n");
+      }
+
+      case "CheckStatement":
+        return `${pad}if (!(${this.emitExpression(stmt.condition)})) return ${this.emitExpression(stmt.fallback)};`;
+    }
+  }
+
+  private emitForStatement(
+    stmt: import("../parser/ast.js").ForStatement,
+    indent: number
+  ): string {
+    const pad = " ".repeat(indent);
+    const lines: string[] = [];
+
+    // Check if this is a tailrec/trampoline while(true) sentinel
+    if (
+      stmt.iterable.kind === "BooleanLiteral" &&
+      stmt.iterable.value === true
+    ) {
+      lines.push(`${pad}while (true) {`);
+    } else {
+      lines.push(
+        `${pad}for (const ${stmt.variable} of ${this.emitExpression(stmt.iterable)}) {`
+      );
+    }
+
+    for (const s of stmt.body) {
+      lines.push(this.emitStatement(s, indent + 2));
+    }
+    lines.push(`${pad}}`);
+    return lines.join("\n");
+  }
+
+  emitExpression(expr: Expression): string {
+    switch (expr.kind) {
+      case "NumberLiteral":
+        return String(expr.value);
+      case "TextLiteral":
+        return JSON.stringify(expr.value);
+      case "BooleanLiteral":
+        return String(expr.value);
+      case "IdentifierExpr":
+        return expr.name;
+      case "SelfExpr":
+        return "this";
+      case "DotAccess":
+        return `${this.emitExpression(expr.object)}.${expr.field}`;
+      case "ShortDotAccess":
+        return `.${expr.field}`;
+      case "CallExpr": {
+        const callee = this.emitExpression(expr.callee);
+        const args = expr.args.map((a) => {
+          if (a.name) return `/* ${a.name}: */ ${this.emitExpression(a.value)}`;
+          return this.emitExpression(a.value);
+        });
+        return `${callee}(${args.join(", ")})`;
+      }
+      case "BinaryExpr": {
+        const op = expr.operator === "and" ? "&&" : expr.operator === "or" ? "||" : expr.operator;
+        return `(${this.emitExpression(expr.left)} ${op} ${this.emitExpression(expr.right)})`;
+      }
+      case "UnaryExpr": {
+        const op = expr.operator === "not" ? "!" : expr.operator;
+        return `${op}${this.emitExpression(expr.operand)}`;
+      }
+      case "PipelineExpr": {
+        let result = this.emitExpression(expr.source);
+        for (const step of expr.steps) {
+          const callee = this.emitExpression(step.callee);
+          const extraArgs = step.args.map((a) => this.emitExpression(a.value));
+          result = `${callee}(${[result, ...extraArgs].join(", ")})`;
+        }
+        return result;
+      }
+      case "LambdaExpr": {
+        const params = expr.params.map((p) => p.name).join(", ");
+        return `(${params}) => ${this.emitExpression(expr.body)}`;
+      }
+      case "PropagateExpr":
+        // Simplified: would need proper error-handling context
+        return `unwrap(${this.emitExpression(expr.expr)})`;
+      case "WithExpr": {
+        const updates = expr.updates
+          .map((u) => `${u.field}: ${this.emitExpression(u.value)}`)
+          .join(", ");
+        return `{ ...${this.emitExpression(expr.base)}, ${updates} }`;
+      }
+      case "ListLiteral":
+        return `[${expr.elements.map((e) => this.emitExpression(e)).join(", ")}]`;
+      case "ConstructExpr": {
+        const fields = expr.fields
+          .map((f) => `${f.name}: ${this.emitExpression(f.value)}`)
+          .join(", ");
+        return `{ ${fields} }`;
+      }
+    }
+  }
+
+  private emitPatternCondition(
+    pattern: import("../parser/ast.js").Pattern,
+    subject: string
+  ): string {
+    switch (pattern.kind) {
+      case "LiteralPattern":
+        return `${subject} === ${JSON.stringify(pattern.value)}`;
+      case "IdentifierPattern":
+        return "true"; // binding pattern, always matches
+      case "WildcardPattern":
+        return "true";
+      case "ConstructorPattern":
+        return `${subject}.kind === ${JSON.stringify(pattern.name)}`;
+      case "TuplePattern":
+        return pattern.elements
+          .map((el, i) => this.emitPatternCondition(el, `${subject}[${i}]`))
+          .join(" && ");
+    }
+  }
+
+  emitType(type: TypeNode): string {
+    switch (type.kind) {
+      case "SimpleType": {
+        const map: Record<string, string> = {
+          Text: "string",
+          Number: "number",
+          Boolean: "boolean",
+          Void: "void",
+        };
+        return map[type.name] ?? type.name;
+      }
+      case "GenericType": {
+        if (type.name === "Result" && type.typeArgs.length === 2) {
+          const ok = this.emitType(type.typeArgs[0]);
+          const err = this.emitType(type.typeArgs[1]);
+          return `{ ok: true; value: ${ok} } | { ok: false; error: ${err} }`;
+        }
+        if (type.name === "Maybe" && type.typeArgs.length === 1) {
+          return `${this.emitType(type.typeArgs[0])} | null`;
+        }
+        if (type.name === "List" && type.typeArgs.length === 1) {
+          return `${this.emitType(type.typeArgs[0])}[]`;
+        }
+        if (type.name === "Map" && type.typeArgs.length === 2) {
+          return `Map<${this.emitType(type.typeArgs[0])}, ${this.emitType(type.typeArgs[1])}>`;
+        }
+        if (type.name === "Set" && type.typeArgs.length === 1) {
+          return `Set<${this.emitType(type.typeArgs[0])}>`;
+        }
+        const args = type.typeArgs.map((a) => this.emitType(a)).join(", ");
+        return `${type.name}<${args}>`;
+      }
+      case "FunctionType": {
+        const params = type.params
+          .map((p, i) => `arg${i}: ${this.emitType(p)}`)
+          .join(", ");
+        return `(${params}) => ${this.emitType(type.returnType)}`;
+      }
+    }
   }
 }

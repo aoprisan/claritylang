@@ -13,3 +13,21 @@ export type {
   EnumDef,
   Annotation,
 } from "./parser/ast.js";
+
+export {
+  checkTailRecursion,
+  transformTailRecToLoop,
+} from "./typechecker/tailrec.js";
+export type { TailRecError, TailRecResult } from "./typechecker/tailrec.js";
+
+export {
+  findTrampolineGroups,
+  validateTrampolineGroup,
+  transformTrampolineGroup,
+} from "./typechecker/trampoline.js";
+export type {
+  TrampolineGroup,
+  TrampolineError,
+} from "./typechecker/trampoline.js";
+
+export { TypeScriptEmitter } from "./emitter/typescript.js";
