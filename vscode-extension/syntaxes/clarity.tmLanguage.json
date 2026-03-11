@@ -1,0 +1,185 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ClarityLang",
+  "scopeName": "source.clarity",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#annotations" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#booleans" },
+    { "include": "#keywords-control" },
+    { "include": "#keywords-declaration" },
+    { "include": "#keywords-operator-word" },
+    { "include": "#builtin-types" },
+    { "include": "#function-definition" },
+    { "include": "#struct-definition" },
+    { "include": "#enum-definition" },
+    { "include": "#operators" },
+    { "include": "#punctuation" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.double-dash.clarity",
+      "match": "--.*$"
+    },
+    "annotations": {
+      "patterns": [
+        {
+          "name": "meta.annotation.clarity",
+          "match": "(@\\w+)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.clarity" },
+            "2": { "name": "string.quoted.double.clarity" }
+          }
+        },
+        {
+          "name": "entity.other.attribute-name.clarity",
+          "match": "@\\w+"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.clarity",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.clarity",
+          "match": "\\\\[\"\\\\nrt]"
+        },
+        {
+          "name": "meta.interpolation.clarity",
+          "match": "\\{[^}]*\\}",
+          "captures": {
+            "0": { "name": "variable.other.interpolation.clarity" }
+          }
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.clarity",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.clarity",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "booleans": {
+      "name": "constant.language.boolean.clarity",
+      "match": "\\b(true|false)\\b"
+    },
+    "keywords-declaration": {
+      "name": "keyword.declaration.clarity",
+      "match": "\\b(define|struct|enum|type|import|from)\\b"
+    },
+    "keywords-control": {
+      "name": "keyword.control.clarity",
+      "match": "\\b(if|then|else|for|in|do|match|on|case|return|check|end|async|await)\\b"
+    },
+    "keywords-operator-word": {
+      "name": "keyword.operator.word.clarity",
+      "match": "\\b(and|or|not|is|as|has|with|where|each|all|self)\\b"
+    },
+    "builtin-types": {
+      "name": "support.type.clarity",
+      "match": "\\b(Text|Number|Boolean|Void|List|Map|Set|Maybe|Result|Duration|Date|Timestamp)\\b"
+    },
+    "function-definition": {
+      "match": "\\b(define)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+      "captures": {
+        "1": { "name": "keyword.declaration.clarity" },
+        "2": { "name": "entity.name.function.clarity" }
+      }
+    },
+    "struct-definition": {
+      "match": "\\b(struct)\\s+([A-Z][a-zA-Z0-9]*)\\s+(has)\\b",
+      "captures": {
+        "1": { "name": "keyword.declaration.clarity" },
+        "2": { "name": "entity.name.type.clarity" },
+        "3": { "name": "keyword.operator.word.clarity" }
+      }
+    },
+    "enum-definition": {
+      "match": "\\b(enum)\\s+([A-Z][a-zA-Z0-9]*)\\s+(is)\\b",
+      "captures": {
+        "1": { "name": "keyword.declaration.clarity" },
+        "2": { "name": "entity.name.type.clarity" },
+        "3": { "name": "keyword.operator.word.clarity" }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.pipe.clarity",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.arrow.clarity",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.fat-arrow.clarity",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.propagate.clarity",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.comparison.clarity",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.clarity",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.assignment.clarity",
+          "match": "(?<![=!<>])=(?!=)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.colon.clarity",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.separator.comma.clarity",
+          "match": ","
+        },
+        {
+          "name": "punctuation.accessor.dot.clarity",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.bracket.round.clarity",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.bracket.square.clarity",
+          "match": "[\\[\\]]"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.constant.clarity",
+          "match": "\\b[A-Z][a-zA-Z0-9]*\\b"
+        },
+        {
+          "name": "variable.other.clarity",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}
