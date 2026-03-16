@@ -16,6 +16,9 @@ import {
   Position,
 } from "../parser/ast.js";
 
+/** Prefix used for temporary variables in tail-recursion rewrites. */
+export const TAILREC_PREFIX = "__tailrec_";
+
 export interface TailRecError {
   message: string;
   position: Position;
@@ -400,7 +403,7 @@ function tryReplaceTailCall(
   // special ExpressionStatement with a __continue marker)
   const assignments: Statement[] = paramNames.map((name, i) => ({
     kind: "Assignment" as const,
-    target: `__tailrec_${name}`,
+    target: `${TAILREC_PREFIX}${name}`,
     value: expr.args[i]?.value ?? {
       kind: "IdentifierExpr" as const,
       name,
@@ -409,13 +412,14 @@ function tryReplaceTailCall(
     position: expr.position,
   }));
 
-  // After computing all new values, assign them to actual params
+  // After computing all new values, reassign the actual params
   const finalAssignments: Statement[] = paramNames.map((name) => ({
     kind: "Assignment" as const,
     target: name,
+    isReassignment: true,
     value: {
       kind: "IdentifierExpr" as const,
-      name: `__tailrec_${name}`,
+      name: `${TAILREC_PREFIX}${name}`,
       position: expr.position,
     },
     position: expr.position,

@@ -14,6 +14,7 @@ import {
 import {
   checkTailRecursion,
   transformTailRecToLoop,
+  TAILREC_PREFIX,
 } from "../typechecker/tailrec.js";
 import {
   findTrampolineGroups,
@@ -44,6 +45,10 @@ export class TypeScriptEmitter {
   private errors: string[] = [];
   private needsResultHelper = false;
   private needsMaybeHelper = false;
+
+  private exportPrefix(exported: boolean): string {
+    return exported ? "export " : "";
+  }
 
   emit(program: Program): string {
     this.errors = [];
@@ -98,19 +103,19 @@ export class TypeScriptEmitter {
 
       switch (decl.kind) {
         case "FunctionDef":
-          chunks.push(this.emitFunctionDef(decl));
+          chunks.push(this.emitFunctionDef(decl, true));
           chunks.push("");
           break;
         case "StructDef":
-          chunks.push(this.emitStructDef(decl));
+          chunks.push(this.emitStructDef(decl, true));
           chunks.push("");
           break;
         case "EnumDef":
-          chunks.push(this.emitEnumDef(decl));
+          chunks.push(this.emitEnumDef(decl, true));
           chunks.push("");
           break;
         case "TypeAlias":
-          chunks.push(this.emitTypeAlias(decl));
+          chunks.push(this.emitTypeAlias(decl, true));
           chunks.push("");
           break;
         case "ImportDecl":
@@ -155,7 +160,7 @@ export class TypeScriptEmitter {
     return allChunks.join("\n").trimEnd() + "\n";
   }
 
-  emitFunctionDef(func: FunctionDef): string {
+  emitFunctionDef(func: FunctionDef, exported = false): string {
     // Check @tailrec annotation
     const tailRecResult = checkTailRecursion(func);
     if (tailRecResult.errors.length > 0) {
@@ -169,12 +174,12 @@ export class TypeScriptEmitter {
       targetFunc = transformTailRecToLoop(func);
     }
 
-    return this.emitFunction(targetFunc, tailRecResult.isTailRecursive);
+    return this.emitFunction(targetFunc, tailRecResult.isTailRecursive, exported);
   }
 
-  emitStructDef(struct: StructDef): string {
+  emitStructDef(struct: StructDef, exported = false): string {
     const lines: string[] = [];
-    lines.push(`interface ${struct.name} {`);
+    lines.push(`${this.exportPrefix(exported)}interface ${struct.name} {`);
     for (const field of struct.fields) {
       lines.push(`  ${field.name}: ${this.emitType(field.type)};`);
     }
@@ -189,9 +194,9 @@ export class TypeScriptEmitter {
     return lines.join("\n");
   }
 
-  emitEnumDef(enumDef: EnumDef): string {
+  emitEnumDef(enumDef: EnumDef, exported = false): string {
     const lines: string[] = [];
-    lines.push(`enum ${enumDef.name} {`);
+    lines.push(`${this.exportPrefix(exported)}enum ${enumDef.name} {`);
     for (const variant of enumDef.variants) {
       lines.push(`  ${variant},`);
     }
@@ -199,8 +204,8 @@ export class TypeScriptEmitter {
     return lines.join("\n");
   }
 
-  emitTypeAlias(alias: TypeAlias): string {
-    return `type ${alias.name} = ${this.emitType(alias.type)};`;
+  emitTypeAlias(alias: TypeAlias, exported = false): string {
+    return `${this.exportPrefix(exported)}type ${alias.name} = ${this.emitType(alias.type)};`;
   }
 
   emitImportDecl(decl: ImportDecl): string {
@@ -212,7 +217,7 @@ export class TypeScriptEmitter {
     return `import { ${decl.name} } from "${decl.source}";`;
   }
 
-  private emitFunction(func: FunctionDef, isTailRecOptimized: boolean): string {
+  private emitFunction(func: FunctionDef, isTailRecOptimized: boolean, exported = false): string {
     const params = func.params
       .map((p) => `${p.name}: ${this.emitType(p.type)}`)
       .join(", ");
@@ -223,7 +228,7 @@ export class TypeScriptEmitter {
     const usesPropagation = this.bodyUsesPropagation(func.body);
 
     const lines: string[] = [];
-    lines.push(`${asyncPrefix}function ${func.name}(${params})${returnType} {`);
+    lines.push(`${this.exportPrefix(exported)}${asyncPrefix}function ${func.name}(${params})${returnType} {`);
 
     const baseIndent = usesPropagation ? 4 : 2;
 
@@ -249,7 +254,7 @@ export class TypeScriptEmitter {
 
     if (usesPropagation) {
       lines.push("  } catch (__e: unknown) {");
-      lines.push("    if (__e && typeof __e === \"object\" && \"__clarityPropagate\" in __e) return (__e as any).value;");
+      lines.push("    if (__e && typeof __e === \"object\" && \"__clarityPropagate\" in __e) return (__e as { value: unknown }).value;");
       lines.push("    throw __e;");
       lines.push("  }");
     }
@@ -410,8 +415,13 @@ export class TypeScriptEmitter {
       case "ReturnStatement":
         return `${pad}return ${this.emitExpression(stmt.value)};`;
 
-      case "Assignment":
-        return `${pad}let ${stmt.target} = ${this.emitExpression(stmt.value)};`;
+      case "Assignment": {
+        if (stmt.isReassignment) {
+          return `${pad}${stmt.target} = ${this.emitExpression(stmt.value)};`;
+        }
+        const binding = stmt.target.startsWith(TAILREC_PREFIX) ? "let" : "const";
+        return `${pad}${binding} ${stmt.target} = ${this.emitExpression(stmt.value)};`;
+      }
 
       case "ExpressionStatement": {
         // Check for __tailrec_continue sentinel
@@ -455,14 +465,20 @@ export class TypeScriptEmitter {
         const lines: string[] = [];
         // Emit as if-else chain
         let first = true;
+        const subjectExpr = this.emitExpression(stmt.subject);
         for (const matchCase of stmt.cases) {
           const prefix = first ? "if" : "} else if";
           first = false;
+          const bindings: { name: string; expr: string }[] = [];
           const cond = this.emitPatternCondition(
             matchCase.pattern,
-            this.emitExpression(stmt.subject)
+            subjectExpr,
+            bindings
           );
           lines.push(`${pad}${prefix} (${cond}) {`);
+          for (const binding of bindings) {
+            lines.push(`${pad}  const ${binding.name} = ${binding.expr};`);
+          }
           if (Array.isArray(matchCase.body)) {
             for (const s of matchCase.body) {
               lines.push(this.emitStatement(s, indent + 2));
@@ -510,8 +526,17 @@ export class TypeScriptEmitter {
     switch (expr.kind) {
       case "NumberLiteral":
         return String(expr.value);
-      case "TextLiteral":
+      case "TextLiteral": {
+        // Detect {interpolation} patterns and emit as template literal
+        if (expr.value.includes("{") && expr.value.includes("}")) {
+          const escaped = expr.value
+            .replace(/\\/g, "\\\\")
+            .replace(/`/g, "\\`")
+            .replace(/\{([^}]+)\}/g, (_match, inner: string) => `\${${inner.trim()}}`);
+          return `\`${escaped}\``;
+        }
         return JSON.stringify(expr.value);
+      }
       case "BooleanLiteral":
         return String(expr.value);
       case "IdentifierExpr":
@@ -580,12 +605,14 @@ export class TypeScriptEmitter {
 
   private emitPatternCondition(
     pattern: import("../parser/ast.js").Pattern,
-    subject: string
+    subject: string,
+    bindings: { name: string; expr: string }[]
   ): string {
     switch (pattern.kind) {
       case "LiteralPattern":
         return `${subject} === ${JSON.stringify(pattern.value)}`;
       case "IdentifierPattern":
+        bindings.push({ name: pattern.name, expr: subject });
         return "true"; // binding pattern, always matches
       case "WildcardPattern":
         return "true";
@@ -593,7 +620,7 @@ export class TypeScriptEmitter {
         return `${subject}.kind === ${JSON.stringify(pattern.name)}`;
       case "TuplePattern":
         return pattern.elements
-          .map((el, i) => this.emitPatternCondition(el, `${subject}[${i}]`))
+          .map((el, i) => this.emitPatternCondition(el, `${subject}[${i}]`, bindings))
           .join(" && ");
     }
   }
