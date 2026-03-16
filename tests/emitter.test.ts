@@ -124,7 +124,7 @@ end`);
 end`);
 
     expect(output).toContain("async function fetch_data(url: string): string {");
-    expect(output).toContain("let result = await get(url);");
+    expect(output).toContain("const result = await get(url);");
   });
 
   it("emits all expression as Promise.all", () => {
@@ -134,7 +134,7 @@ end`);
 end`);
 
     expect(output).toContain("async function fetch_both");
-    expect(output).toContain("let results = await Promise.all([get(a), get(b)]);");
+    expect(output).toContain("const results = await Promise.all([get(a), get(b)]);");
   });
 
   it("emits @tailrec function as while loop (end to end)", () => {
@@ -149,5 +149,91 @@ end`);
 
     expect(output).toContain("while (true)");
     expect(output).toContain("continue;");
+  });
+
+  it("emits const for variable assignments", () => {
+    const output = compileToTS(`define test(x: Number) -> Number as
+  y = x + 1
+  return y
+end`);
+
+    expect(output).toContain("const y = (x + 1);");
+    expect(output).not.toContain("let y");
+  });
+
+  it("emits tailrec param reassignment without const/let", () => {
+    const output = compileToTS(`@tailrec
+define countdown(n: Number) -> Number as
+  if n <= 0 then
+    return 0
+  else
+    return countdown(n - 1)
+  end
+end`);
+
+    // Temp vars use let, param reassignments are bare
+    expect(output).toContain("let __tailrec_n");
+    expect(output).toMatch(/^\s+n = __tailrec_n;/m);
+    expect(output).not.toMatch(/const n = __tailrec_n/);
+  });
+
+  it("emits export on top-level declarations", () => {
+    const output = compileToTS(`define add(a: Number, b: Number) -> Number as
+  return a + b
+end`);
+
+    expect(output).toContain("export function add");
+  });
+
+  it("emits export on structs", () => {
+    const output = compileToTS(`struct Point has
+  x: Number
+  y: Number
+end`);
+
+    expect(output).toContain("export interface Point");
+  });
+
+  it("emits export on enums", () => {
+    const output = compileToTS(`enum Color is
+  Red
+  Green
+  Blue
+end`);
+
+    expect(output).toContain("export enum Color");
+  });
+
+  it("emits export on type aliases", () => {
+    const output = compileToTS(`type UserId = Number`);
+    expect(output).toContain("export type UserId");
+  });
+
+  it("emits string interpolation as template literal", () => {
+    const output = compileToTS(`define greet(name: Text) -> Text as
+  return "Hello, {name}!"
+end`);
+
+    expect(output).toContain("`Hello, ${name}!`");
+  });
+
+  it("emits plain strings without interpolation as regular strings", () => {
+    const output = compileToTS(`define test() -> Text as
+  return "no interpolation"
+end`);
+
+    expect(output).toContain('"no interpolation"');
+    expect(output).not.toContain("`");
+  });
+
+  it("emits match with pattern variable bindings", () => {
+    const output = compileToTS(`define describe(x: Number) -> Text as
+  match x on
+    case 0 => return "zero"
+    case n => return "other"
+  end
+end`);
+
+    expect(output).toContain("const n = x;");
   });
 });

@@ -409,10 +409,11 @@ function tryReplaceTailCall(
     position: expr.position,
   }));
 
-  // After computing all new values, assign them to actual params
+  // After computing all new values, reassign the actual params
   const finalAssignments: Statement[] = paramNames.map((name) => ({
     kind: "Assignment" as const,
     target: name,
+    isReassignment: true,
     value: {
       kind: "IdentifierExpr" as const,
       name: `__tailrec_${name}`,

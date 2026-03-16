@@ -186,6 +186,7 @@ export interface Assignment {
   kind: "Assignment";
   target: string;
   value: Expression;
+  isReassignment?: boolean;
   position: Position;
 }
 
