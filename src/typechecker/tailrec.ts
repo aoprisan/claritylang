@@ -142,7 +142,7 @@ function checkStatementForTailCalls(
     case "RepeatStatement":
       checkExprForTailCalls(stmt.condition, funcName, false, recursiveCalls, tailCalls);
       for (const s of stmt.body) {
-        checkStmtForTailCalls(s, funcName, false, recursiveCalls, tailCalls);
+        checkStatementForTailCalls(s, funcName, false, recursiveCalls, tailCalls);
       }
       break;
   }

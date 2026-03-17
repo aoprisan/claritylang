@@ -333,36 +333,23 @@ export class TypeScriptEmitter {
 
     // Tagged union — emit as discriminated union type + constructor functions
     const lines: string[] = [];
-
-    // Type for each variant
     const variantTypes: string[] = [];
+    const constructors: string[] = [];
+
     for (const variant of enumDef.variants) {
       if (variant.fields.length === 0) {
         variantTypes.push(`{ kind: "${variant.name}" }`);
+        constructors.push(`function ${variant.name}(): ${enumDef.name} { return { kind: "${variant.name}" }; }`);
       } else {
-        const fields = variant.fields
-          .map(f => `${f.name}: ${this.emitType(f.type)}`)
-          .join("; ");
-        variantTypes.push(`{ kind: "${variant.name}"; ${fields} }`);
+        const fieldSigs = variant.fields.map(f => `${f.name}: ${this.emitType(f.type)}`);
+        variantTypes.push(`{ kind: "${variant.name}"; ${fieldSigs.join("; ")} }`);
+        const obj = variant.fields.map(f => f.name).join(", ");
+        constructors.push(`function ${variant.name}(${fieldSigs.join(", ")}): ${enumDef.name} { return { kind: "${variant.name}", ${obj} }; }`);
       }
     }
+
     lines.push(`${this.exportPrefix(exported)}type ${enumDef.name} = ${variantTypes.join(" | ")};`);
-
-    // Constructor function for each variant
-    for (const variant of enumDef.variants) {
-      if (variant.fields.length === 0) {
-        lines.push(`function ${variant.name}(): ${enumDef.name} { return { kind: "${variant.name}" }; }`);
-      } else {
-        const params = variant.fields
-          .map(f => `${f.name}: ${this.emitType(f.type)}`)
-          .join(", ");
-        const obj = variant.fields
-          .map(f => f.name)
-          .join(", ");
-        lines.push(`function ${variant.name}(${params}): ${enumDef.name} { return { kind: "${variant.name}", ${obj} }; }`);
-      }
-    }
-
+    lines.push(...constructors);
     return lines.join("\n");
   }
 
@@ -456,6 +443,9 @@ export class TypeScriptEmitter {
       case "CheckStatement":
         return this.exprUsesPropagation(stmt.condition) ||
           this.exprUsesPropagation(stmt.fallback);
+      case "RepeatStatement":
+        return this.exprUsesPropagation(stmt.condition) ||
+          this.bodyUsesPropagation(stmt.body);
     }
   }
 

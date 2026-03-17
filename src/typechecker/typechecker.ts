@@ -330,6 +330,11 @@ export class TypeChecker {
           this.bindPattern(pattern.inner, scope);
         }
         break;
+      case "OrPattern":
+        for (const p of pattern.patterns) {
+          this.bindPattern(p, scope);
+        }
+        break;
       default:
         break;
     }

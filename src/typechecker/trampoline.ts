@@ -200,7 +200,7 @@ function findNonTailInStatement(
       break;
     case "RepeatStatement":
       findNonTailInExpr(stmt.condition, groupNames, false, nonTailCalls);
-      for (const s of stmt.body) findNonTailInStmt(s, groupNames, false, nonTailCalls);
+      for (const s of stmt.body) findNonTailInStatement(s, groupNames, false, nonTailCalls);
       break;
   }
 }

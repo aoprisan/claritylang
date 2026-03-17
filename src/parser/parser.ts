@@ -635,19 +635,17 @@ export class Parser {
   // ─── Patterns ───
 
   private parsePattern(): Pattern {
-    let pattern = this.parseSinglePattern();
+    const first = this.parseSinglePattern();
+
+    if (!this.check(TokenKind.Bar)) return first;
 
     // Or-pattern: pattern | pattern | ...
-    if (this.check(TokenKind.Bar)) {
-      const patterns: Pattern[] = [pattern];
-      while (this.check(TokenKind.Bar)) {
-        this.advance();
-        patterns.push(this.parseSinglePattern());
-      }
-      return { kind: "OrPattern", patterns };
+    const patterns: Pattern[] = [first];
+    while (this.check(TokenKind.Bar)) {
+      this.advance();
+      patterns.push(this.parseSinglePattern());
     }
-
-    return pattern;
+    return { kind: "OrPattern", patterns };
   }
 
   private parseSinglePattern(): Pattern {
