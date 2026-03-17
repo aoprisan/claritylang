@@ -295,6 +295,40 @@ end`);
     }
   });
 
+  it("parses match with pattern guard", () => {
+    const ast = parse(`define test(x: Number) -> Text as
+  match x on
+    case n where n >= 18 => "adult"
+    case _ => "minor"
+  end
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const match = func.body[0];
+      if (match.kind === "MatchStatement") {
+        expect(match.cases).toHaveLength(2);
+        expect(match.cases[0].guard).toBeDefined();
+        expect(match.cases[0].guard?.kind).toBe("BinaryExpr");
+        expect(match.cases[1].guard).toBeUndefined();
+      }
+    }
+  });
+
+  it("parses default parameter values", () => {
+    const ast = parse(`define greet(name: Text, greeting: Text = "Hello") -> Text as
+  return greeting
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      expect(func.params).toHaveLength(2);
+      expect(func.params[0].defaultValue).toBeUndefined();
+      expect(func.params[1].defaultValue).toBeDefined();
+      expect(func.params[1].defaultValue?.kind).toBe("TextLiteral");
+    }
+  });
+
   it("parses multiple declarations", () => {
     const ast = parse(`struct Point has
   x: Number

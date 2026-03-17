@@ -222,6 +222,7 @@ export interface MatchStatement {
 
 export interface MatchCase {
   pattern: Pattern;
+  guard?: Expression;
   body: Expression | Statement[];
 }
 

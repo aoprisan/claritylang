@@ -219,7 +219,10 @@ export class TypeScriptEmitter {
 
   private emitFunction(func: FunctionDef, isTailRecOptimized: boolean, exported = false): string {
     const params = func.params
-      .map((p) => `${p.name}: ${this.emitType(p.type)}`)
+      .map((p) => {
+        const def = p.defaultValue ? ` = ${this.emitExpression(p.defaultValue)}` : "";
+        return `${p.name}: ${this.emitType(p.type)}${def}`;
+      })
       .join(", ");
     const returnType = func.returnType
       ? `: ${this.emitType(func.returnType)}`
@@ -470,11 +473,14 @@ export class TypeScriptEmitter {
           const prefix = first ? "if" : "} else if";
           first = false;
           const bindings: { name: string; expr: string }[] = [];
-          const cond = this.emitPatternCondition(
+          let cond = this.emitPatternCondition(
             matchCase.pattern,
             subjectExpr,
             bindings
           );
+          if (matchCase.guard) {
+            cond = `${cond} && (${this.emitExpression(matchCase.guard)})`;
+          }
           lines.push(`${pad}${prefix} (${cond}) {`);
           for (const binding of bindings) {
             lines.push(`${pad}  const ${binding.name} = ${binding.expr};`);
@@ -540,6 +546,7 @@ export class TypeScriptEmitter {
       case "BooleanLiteral":
         return String(expr.value);
       case "IdentifierExpr":
+        if (expr.name === "none") return "null";
         return expr.name;
       case "SelfExpr":
         return "this";
@@ -549,6 +556,18 @@ export class TypeScriptEmitter {
         return `.${expr.field}`;
       case "CallExpr": {
         const callee = this.emitExpression(expr.callee);
+        // Built-in Result/Maybe constructors
+        if (expr.callee.kind === "IdentifierExpr") {
+          if (expr.callee.name === "ok" && expr.args.length === 1) {
+            return `{ ok: true, value: ${this.emitExpression(expr.args[0].value)} }`;
+          }
+          if (expr.callee.name === "err" && expr.args.length === 1) {
+            return `{ ok: false, error: ${this.emitExpression(expr.args[0].value)} }`;
+          }
+          if (expr.callee.name === "some" && expr.args.length === 1) {
+            return this.emitExpression(expr.args[0].value);
+          }
+        }
         const args = expr.args.map((a) => {
           if (a.name) return `/* ${a.name}: */ ${this.emitExpression(a.value)}`;
           return this.emitExpression(a.value);

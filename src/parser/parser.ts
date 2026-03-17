@@ -496,6 +496,11 @@ export class Parser {
     while (this.check(TokenKind.Case)) {
       this.advance();
       const pattern = this.parsePattern();
+      let guard: Expression | undefined;
+      if (this.check(TokenKind.Where)) {
+        this.advance();
+        guard = this.parseExpression();
+      }
       this.consume(TokenKind.FatArrow, "'=>'");
       this.skipNewlines();
 
@@ -519,7 +524,7 @@ export class Parser {
           stmts.push(this.parseStatement());
           this.skipNewlines();
         }
-        cases.push({ pattern, body: stmts });
+        cases.push({ pattern, guard, body: stmts });
       } else {
         // Could be expression or assignment
         if (
@@ -537,11 +542,11 @@ export class Parser {
             stmts.push(this.parseStatement());
             this.skipNewlines();
           }
-          cases.push({ pattern, body: stmts });
+          cases.push({ pattern, guard, body: stmts });
         } else {
           const expr = this.parseExpression();
           this.skipNewlines();
-          cases.push({ pattern, body: expr });
+          cases.push({ pattern, guard, body: expr });
         }
       }
     }

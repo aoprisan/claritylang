@@ -236,4 +236,56 @@ end`);
 
     expect(output).toContain("const n = x;");
   });
+
+  it("emits ok() as Result object literal", () => {
+    const output = compileToTS(`define test() -> Result<Number, Error> as
+  return ok(42)
+end`);
+
+    expect(output).toContain("{ ok: true, value: 42 }");
+  });
+
+  it("emits err() as Result object literal", () => {
+    const output = compileToTS(`define test() -> Result<Number, Text> as
+  return err("oops")
+end`);
+
+    expect(output).toContain('{ ok: false, error: "oops" }');
+  });
+
+  it("emits some() as the inner value", () => {
+    const output = compileToTS(`define test() -> Maybe<Number> as
+  return some(42)
+end`);
+
+    expect(output).toContain("return 42;");
+  });
+
+  it("emits none as null", () => {
+    const output = compileToTS(`define test() -> Maybe<Number> as
+  return none
+end`);
+
+    expect(output).toContain("return null;");
+  });
+
+  it("emits pattern guard as additional condition", () => {
+    const output = compileToTS(`define classify(age: Number) -> Text as
+  match age on
+    case n where n >= 18 => return "adult"
+    case _ => return "minor"
+  end
+end`);
+
+    expect(output).toContain("&& ((n >= 18))");
+    expect(output).toContain("const n = age;");
+  });
+
+  it("emits default parameter values", () => {
+    const output = compileToTS(`define greet(name: Text, greeting: Text = "Hello") -> Text as
+  return greeting
+end`);
+
+    expect(output).toContain('greeting: string = "Hello"');
+  });
 });
