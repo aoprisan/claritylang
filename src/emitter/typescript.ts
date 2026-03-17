@@ -105,19 +105,19 @@ export class TypeScriptEmitter {
 
       switch (decl.kind) {
         case "FunctionDef":
-          chunks.push(this.emitFunctionDef(decl, true));
+          chunks.push(this.emitFunctionDef(decl, decl.isExported ?? false));
           chunks.push("");
           break;
         case "StructDef":
-          chunks.push(this.emitStructDef(decl, true));
+          chunks.push(this.emitStructDef(decl, decl.isExported ?? false));
           chunks.push("");
           break;
         case "EnumDef":
-          chunks.push(this.emitEnumDef(decl, true));
+          chunks.push(this.emitEnumDef(decl, decl.isExported ?? false));
           chunks.push("");
           break;
         case "TypeAlias":
-          chunks.push(this.emitTypeAlias(decl, true));
+          chunks.push(this.emitTypeAlias(decl, decl.isExported ?? false));
           chunks.push("");
           break;
         case "ImportDecl":
@@ -229,6 +229,10 @@ export class TypeScriptEmitter {
           this.collectIdsFromExpr(stmt.condition, ids);
           this.collectIdsFromBody(stmt.body, ids);
           break;
+        case "TryRescueStatement":
+          this.collectIdsFromBody(stmt.tryBlock, ids);
+          this.collectIdsFromBody(stmt.rescueBlock, ids);
+          break;
       }
     }
   }
@@ -256,6 +260,9 @@ export class TypeScriptEmitter {
       case "DotAccess":
         this.collectIdsFromExpr(expr.object, ids); break;
       case "LambdaExpr":
+        if (expr.blockBody) {
+          this.collectIdsFromBody(expr.blockBody, ids);
+        }
         this.collectIdsFromExpr(expr.body, ids); break;
       case "PropagateExpr":
       case "AwaitExpr":
@@ -446,6 +453,9 @@ export class TypeScriptEmitter {
       case "RepeatStatement":
         return this.exprUsesPropagation(stmt.condition) ||
           this.bodyUsesPropagation(stmt.body);
+      case "TryRescueStatement":
+        return this.bodyUsesPropagation(stmt.tryBlock) ||
+          this.bodyUsesPropagation(stmt.rescueBlock);
     }
   }
 
@@ -678,6 +688,20 @@ export class TypeScriptEmitter {
         lines.push(`${pad}}`);
         return lines.join("\n");
       }
+
+      case "TryRescueStatement": {
+        const lines: string[] = [];
+        lines.push(`${pad}try {`);
+        for (const s of stmt.tryBlock) {
+          lines.push(this.emitStatement(s, indent + 2));
+        }
+        lines.push(`${pad}} catch (${stmt.errorVar}: unknown) {`);
+        for (const s of stmt.rescueBlock) {
+          lines.push(this.emitStatement(s, indent + 2));
+        }
+        lines.push(`${pad}}`);
+        return lines.join("\n");
+      }
     }
   }
 
@@ -747,10 +771,7 @@ export class TypeScriptEmitter {
             return this.emitExpression(expr.args[0].value);
           }
         }
-        const args = expr.args.map((a) => {
-          if (a.name) return this.emitExpression(a.value);
-          return this.emitExpression(a.value);
-        });
+        const args = expr.args.map((a) => this.emitExpression(a.value));
         return `${callee}(${args.join(", ")})`;
       }
       case "BinaryExpr": {
@@ -772,6 +793,15 @@ export class TypeScriptEmitter {
       }
       case "LambdaExpr": {
         const params = expr.params.map((p) => p.name).join(", ");
+        if (expr.blockBody) {
+          const lines: string[] = [];
+          lines.push(`(${params}) => {`);
+          for (const stmt of expr.blockBody) {
+            lines.push(this.emitStatement(stmt, 2));
+          }
+          lines.push("}");
+          return lines.join("\n");
+        }
         return `(${params}) => ${this.emitExpression(expr.body)}`;
       }
       case "PropagateExpr": {
@@ -835,6 +865,30 @@ export class TypeScriptEmitter {
         return "(" + pattern.patterns
           .map(p => this.emitPatternCondition(p, subject, bindings))
           .join(" || ") + ")";
+      case "ListPattern": {
+        const conditions: string[] = [];
+        if (pattern.elements.length > 0) {
+          conditions.push(`${subject}.length >= ${pattern.elements.length}`);
+        } else if (!pattern.rest) {
+          conditions.push(`${subject}.length === 0`);
+        }
+        for (let i = 0; i < pattern.elements.length; i++) {
+          const elemCond = this.emitPatternCondition(pattern.elements[i], `${subject}[${i}]`, bindings);
+          if (elemCond !== "true") conditions.push(elemCond);
+        }
+        if (pattern.rest) {
+          bindings.push({ name: pattern.rest, expr: `${subject}.slice(${pattern.elements.length})` });
+        }
+        return conditions.length > 0 ? conditions.join(" && ") : "true";
+      }
+      case "StructPattern": {
+        const conditions: string[] = [];
+        for (const field of pattern.fields) {
+          const fieldCond = this.emitPatternCondition(field.pattern, `${subject}.${field.fieldName}`, bindings);
+          if (fieldCond !== "true") conditions.push(fieldCond);
+        }
+        return conditions.length > 0 ? conditions.join(" && ") : "true";
+      }
     }
   }
 
@@ -876,6 +930,8 @@ export class TypeScriptEmitter {
           .join(", ");
         return `(${params}) => ${this.emitType(type.returnType)}`;
       }
+      case "UnionType":
+        return type.types.map(t => this.emitType(t)).join(" | ");
     }
   }
 }

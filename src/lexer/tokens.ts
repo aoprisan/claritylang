@@ -47,6 +47,9 @@ export enum TokenKind {
   By = "by",
   Repeat = "repeat",
   While = "while",
+  Try = "try",
+  Rescue = "rescue",
+  Export = "export",
 
   // Operators
   Pipe = "|>",
@@ -126,6 +129,9 @@ export const KEYWORDS: Record<string, TokenKind> = {
   by: TokenKind.By,
   repeat: TokenKind.Repeat,
   while: TokenKind.While,
+  try: TokenKind.Try,
+  rescue: TokenKind.Rescue,
+  export: TokenKind.Export,
   true: TokenKind.BooleanLiteral,
   false: TokenKind.BooleanLiteral,
 };

@@ -477,6 +477,39 @@ end`);
     expect(output).toContain("__lithoPropagate");
   });
 
+  it("accepts exhaustive match with or-patterns covering all variants", () => {
+    const errors = check(`enum Color is
+  Red
+  Green
+  Blue
+end
+
+define describe_color(c: Color) -> Text as
+  match c on
+    case Red | Green => return "warm"
+    case Blue => return "cool"
+  end
+end`);
+    expect(errors.length).toBe(0);
+  });
+
+  it("reports missing variants in match with or-patterns", () => {
+    const errors = check(`enum Color is
+  Red
+  Green
+  Blue
+end
+
+define describe_color(c: Color) -> Text as
+  match c on
+    case Red | Green => return "warm"
+  end
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Non-exhaustive match");
+    expect(errors[0].message).toContain("Blue");
+  });
+
   it("does not emit try-catch for functions without propagation", () => {
     const output = compileToTS(`define add(a: Number, b: Number) -> Number as
   return a + b

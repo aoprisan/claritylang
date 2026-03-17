@@ -309,6 +309,15 @@ export class TypeChecker {
         for (const s of stmt.body) this.checkStatement(s, scope, declaredReturn, functionName);
         break;
       }
+
+      case "TryRescueStatement": {
+        const tryScope = createScope(scope);
+        for (const s of stmt.tryBlock) this.checkStatement(s, tryScope, declaredReturn, functionName);
+        const rescueScope = createScope(scope);
+        rescueScope.variables.set(stmt.errorVar, { kind: "unknown" });
+        for (const s of stmt.rescueBlock) this.checkStatement(s, rescueScope, declaredReturn, functionName);
+        break;
+      }
     }
   }
 
@@ -335,6 +344,19 @@ export class TypeChecker {
           this.bindPattern(p, scope);
         }
         break;
+      case "ListPattern":
+        for (const el of pattern.elements) {
+          this.bindPattern(el, scope);
+        }
+        if (pattern.rest) {
+          scope.variables.set(pattern.rest, { kind: "unknown" });
+        }
+        break;
+      case "StructPattern":
+        for (const f of pattern.fields) {
+          this.bindPattern(f.pattern, scope);
+        }
+        break;
       default:
         break;
     }
@@ -346,6 +368,14 @@ export class TypeChecker {
         return { kind: "primitive", name: "Number" };
 
       case "TextLiteral":
+        // Type-check interpolation expressions
+        if (expr.segments) {
+          for (const seg of expr.segments) {
+            if ("expr" in seg) {
+              this.inferExpression(seg.expr, scope);
+            }
+          }
+        }
         return { kind: "primitive", name: "Text" };
 
       case "BooleanLiteral":
@@ -670,6 +700,11 @@ export class TypeChecker {
         this.validateTypeNode(type.returnType);
         break;
       }
+      case "UnionType":
+        for (const t of type.types) {
+          this.validateTypeNode(t);
+        }
+        break;
     }
   }
 
@@ -730,6 +765,8 @@ export class TypeChecker {
           returnType: this.resolveTypeNode(type.returnType),
         };
       }
+      case "UnionType":
+        return { kind: "unknown" };
     }
   }
 
@@ -817,16 +854,22 @@ export class TypeChecker {
 
     // Collect covered variants from unguarded patterns
     const coveredVariants = new Set<string>();
+    const collectVariantsFromPattern = (pattern: import("../parser/ast.js").Pattern): void => {
+      if (pattern.kind === "ConstructorPattern") {
+        coveredVariants.add(pattern.name);
+      } else if (pattern.kind === "IdentifierPattern" && allVariants.has(pattern.name)) {
+        coveredVariants.add(pattern.name);
+      } else if (pattern.kind === "LiteralPattern" && typeof pattern.value === "string") {
+        coveredVariants.add(pattern.value);
+      } else if (pattern.kind === "OrPattern") {
+        for (const sub of pattern.patterns) {
+          collectVariantsFromPattern(sub);
+        }
+      }
+    };
     for (const matchCase of stmt.cases) {
       if (matchCase.guard) continue; // guarded cases don't guarantee coverage
-      if (matchCase.pattern.kind === "ConstructorPattern") {
-        coveredVariants.add(matchCase.pattern.name);
-      } else if (matchCase.pattern.kind === "IdentifierPattern" && allVariants.has(matchCase.pattern.name)) {
-        // Bare identifier that matches a variant name
-        coveredVariants.add(matchCase.pattern.name);
-      } else if (matchCase.pattern.kind === "LiteralPattern" && typeof matchCase.pattern.value === "string") {
-        coveredVariants.add(matchCase.pattern.value);
-      }
+      collectVariantsFromPattern(matchCase.pattern);
     }
 
     const missingVariants = subjectType.variants.filter(

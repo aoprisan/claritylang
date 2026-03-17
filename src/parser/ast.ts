@@ -28,7 +28,13 @@ export interface FunctionType {
   position: Position;
 }
 
-export type TypeNode = SimpleType | GenericType | FunctionType;
+export interface UnionType {
+  kind: "UnionType";
+  types: TypeNode[];
+  position: Position;
+}
+
+export type TypeNode = SimpleType | GenericType | FunctionType | UnionType;
 
 // ─── Expression Nodes ───
 
@@ -119,6 +125,7 @@ export interface LambdaExpr {
   kind: "LambdaExpr";
   params: Parameter[];
   body: Expression;
+  blockBody?: Statement[];  // for multi-line lambdas
   position: Position;
 }
 
@@ -261,6 +268,14 @@ export interface ExpressionStatement {
   position: Position;
 }
 
+export interface TryRescueStatement {
+  kind: "TryRescueStatement";
+  tryBlock: Statement[];
+  errorVar: string;
+  rescueBlock: Statement[];
+  position: Position;
+}
+
 export type Statement =
   | Assignment
   | ReturnStatement
@@ -269,7 +284,8 @@ export type Statement =
   | MatchStatement
   | CheckStatement
   | RepeatStatement
-  | ExpressionStatement;
+  | ExpressionStatement
+  | TryRescueStatement;
 
 // ─── Pattern Nodes ───
 
@@ -303,13 +319,27 @@ export interface OrPattern {
   patterns: Pattern[];
 }
 
+export interface ListPattern {
+  kind: "ListPattern";
+  elements: Pattern[];
+  rest: string | null;  // name of rest variable for ..rest, or null
+}
+
+export interface StructPattern {
+  kind: "StructPattern";
+  typeName: string;
+  fields: { fieldName: string; pattern: Pattern }[];
+}
+
 export type Pattern =
   | LiteralPattern
   | IdentifierPattern
   | TuplePattern
   | ConstructorPattern
   | WildcardPattern
-  | OrPattern;
+  | OrPattern
+  | ListPattern
+  | StructPattern;
 
 // ─── Declaration Nodes ───
 
@@ -339,6 +369,7 @@ export interface FunctionDef {
   body: Statement[];
   annotations: Annotation[];
   isAsync: boolean;
+  isExported?: boolean;
   position: Position;
 }
 
@@ -348,6 +379,7 @@ export interface StructDef {
   fields: FieldDef[];
   methods: FunctionDef[];
   annotations: Annotation[];
+  isExported?: boolean;
   position: Position;
 }
 
@@ -361,6 +393,7 @@ export interface EnumDef {
   name: string;
   variants: EnumVariant[];
   annotations: Annotation[];
+  isExported?: boolean;
   position: Position;
 }
 
@@ -368,6 +401,7 @@ export interface TypeAlias {
   kind: "TypeAlias";
   name: string;
   type: TypeNode;
+  isExported?: boolean;
   position: Position;
 }
 

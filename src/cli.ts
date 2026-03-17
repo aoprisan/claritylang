@@ -10,7 +10,7 @@
  *   litho fmt <file.litho>              # Format source
  */
 
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, watchFile } from "fs";
 import { Lexer } from "./lexer/lexer.js";
 import { Parser } from "./parser/parser.js";
 import { TypeChecker } from "./typechecker/typechecker.js";
@@ -29,6 +29,7 @@ Usage:
   litho compile <file.litho>    Transpile to TypeScript
   litho check <file.litho>      Type-check only
   litho fmt <file.litho>        Format source
+  litho watch <file.litho>      Watch and recompile on change
   `);
   process.exit(0);
 }
@@ -112,6 +113,25 @@ switch (command) {
       console.error(`Format error: ${(err as Error).message}`);
       process.exit(1);
     }
+    break;
+  }
+
+  case "watch": {
+    const outPath = file.replace(/\.litho$/, ".ts");
+    const recompile = () => {
+      try {
+        const output = compile(file);
+        const outputFlag = args.indexOf("-o");
+        const target = outputFlag !== -1 && args[outputFlag + 1] ? args[outputFlag + 1] : outPath;
+        writeFileSync(target, output);
+        console.log(`[${new Date().toLocaleTimeString()}] Compiled ${file} → ${target}`);
+      } catch (err) {
+        console.error(`[${new Date().toLocaleTimeString()}] Error: ${(err as Error).message}`);
+      }
+    };
+    recompile();
+    console.log(`Watching ${file} for changes...`);
+    watchFile(file, { interval: 500 }, recompile);
     break;
   }
 
