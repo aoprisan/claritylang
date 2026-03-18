@@ -31,6 +31,69 @@ function panic(message: string): never {
   throw new Error(message);
 }
 
+function split(text: string, delimiter: string): string[] {
+  return text.split(delimiter);
+}
+
+function join(items: string[], delimiter: string): string {
+  return items.join(delimiter);
+}
+
+function trim(text: string): string {
+  return text.trim();
+}
+
+function starts_with(text: string, prefix: string): boolean {
+  return text.startsWith(prefix);
+}
+
+function ends_with(text: string, suffix: string): boolean {
+  return text.endsWith(suffix);
+}
+
+function replace_text(text: string, search: string, replacement: string): string {
+  return text.replaceAll(search, replacement);
+}
+
+function to_upper(text: string): string {
+  return text.toUpperCase();
+}
+
+function to_lower(text: string): string {
+  return text.toLowerCase();
+}
+
+function or_else<T>(value: T | null, fallback: T): T {
+  return value !== null ? value : fallback;
+}
+
+function unwrap_or<T, E>(result: { ok: true; value: T } | { ok: false; error: E }, fallback: T): T {
+  return result.ok ? result.value : fallback;
+}
+
+function now(): Date {
+  return new Date();
+}
+
+function format_date(date: Date, format: string): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return format
+    .replace("YYYY", String(date.getFullYear()))
+    .replace("MM", pad(date.getMonth() + 1))
+    .replace("DD", pad(date.getDate()))
+    .replace("HH", pad(date.getHours()))
+    .replace("mm", pad(date.getMinutes()))
+    .replace("ss", pad(date.getSeconds()));
+}
+
+function add_duration(date: Date, ms: number): Date {
+  return new Date(date.getTime() + ms);
+}
+
+function diff_dates(a: Date, b: Date): number {
+  return a.getTime() - b.getTime();
+}
+
 // --- Litholang Collections ---
 function filter<T>(items: T[], predicate: (item: T) => boolean): T[] {
   return items.filter(predicate);
@@ -153,7 +216,7 @@ function max<T>(items: T[], key?: (item: T) => number): T | number | null {
   return Math.max(...(items as unknown as number[]));
 }
 
-export enum OrderStatus {
+enum OrderStatus {
   Pending,
   Paid,
   Shipped,
@@ -161,19 +224,19 @@ export enum OrderStatus {
   Cancelled,
 }
 
-export interface Item {
+interface Item {
   name: string;
   price: number;
 }
 
-export interface Order {
+interface Order {
   id: string;
   status: OrderStatus;
   items: Item[];
   total: number;
 }
 
-export function transition(order: Order, action: string): { ok: true; value: Order } | { ok: false; error: string } {
+function transition(order: Order, action: string): { ok: true; value: Order } | { ok: false; error: string } {
   if (true && [order.status, action][1] === "pay") {
     const Pending = [order.status, action][0];
     return { ok: true, value: { ...order, status: Paid } };
@@ -192,7 +255,7 @@ export function transition(order: Order, action: string): { ok: true; value: Ord
   }
 }
 
-export function classify_order(order: Order): string {
+function classify_order(order: Order): string {
   if (true && (() => { const t = order.total; return (t >= 1000); })()) {
     const t = order.total;
     return "premium";
@@ -207,8 +270,20 @@ export function classify_order(order: Order): string {
   }
 }
 
-export function create_order(id: string, items: Item[], discount: number = 0): Order {
+function create_order(id: string, items: Item[], discount: number = 0): Order {
   const raw_total = sum(items, (__it) => __it.price);
   const final_total = (raw_total - discount);
   return { id: id, status: Pending, items: items, total: final_total };
+}
+
+function run_command(cmd: [Order, string]): { ok: true; value: Order } | { ok: false; error: string } {
+  if (true && true) {
+    const order = cmd[0];
+    const action = cmd[1];
+    return transition(order, action);
+  }
+}
+
+function batch_transition(commands: [Order, string][]): { ok: true; value: Order } | { ok: false; error: string }[] {
+  return collect(map(commands, (cmd) => run_command(cmd)));
 }

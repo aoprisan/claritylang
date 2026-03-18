@@ -216,104 +216,90 @@ function max<T>(items: T[], key?: (item: T) => number): T | number | null {
   return Math.max(...(items as unknown as number[]));
 }
 
-type Thunk<T> = { done: false; fn: () => Thunk<T> } | { done: true; value: T };
+function __propagateResult<T, E>(result: { ok: true; value: T } | { ok: false; error: E }): T {
+  if (!result.ok) throw { __lithoPropagate: true, value: result };
+  return result.value;
+}
 
-function _trampoline_is_even(n: number): Thunk<boolean> {
-  if ((n == 0)) {
-    return { done: true, value: true };
-  } else {
-    return { done: false, fn: () => _trampoline_is_odd((n - 1)) };
+interface Student {
+  name: string;
+  grade: number;
+}
+
+function min_max(items: number[]): [number, number] {
+  const sorted = sort(items);
+  const lo = first(sorted);
+  const hi = last(sorted);
+  return [lo, hi];
+}
+
+function format_range(bounds: [number, number]): string {
+  if (true && true && (() => { const lo = bounds[0], const hi = bounds[1]; return (lo == hi); })()) {
+    const lo = bounds[0];
+    const hi = bounds[1];
+    return ("exactly " + to_text(lo));
+  } else if (true && true) {
+    const lo = bounds[0];
+    const hi = bounds[1];
+    return ((to_text(lo) + " to ") + to_text(hi));
   }
 }
 
-function _trampoline_is_odd(n: number): Thunk<boolean> {
-  if ((n == 0)) {
-    return { done: true, value: false };
-  } else {
-    return { done: false, fn: () => _trampoline_is_even((n - 1)) };
+function format_numbered(pair: [number, Student]): string {
+  if (true && true) {
+    const i = pair[0];
+    const s = pair[1];
+    return ((to_text((i + 1)) + ". ") + s.name);
   }
 }
 
-function is_even(n: number): boolean {
-  let __result: Thunk<boolean> = _trampoline_is_even(n);
-  while (!__result.done) {
-    __result = __result.fn();
-  }
-  return __result.value;
+function numbered_names(students: Student[]): string[] {
+  return collect(map(enumerate(students), (pair) => format_numbered(pair)));
 }
 
-function is_odd(n: number): boolean {
-  let __result: Thunk<boolean> = _trampoline_is_odd(n);
-  while (!__result.done) {
-    __result = __result.fn();
+function make_student(entry: [string, number]): Student {
+  if (true && true) {
+    const name = entry[0];
+    const grade = entry[1];
+    return { name: name, grade: grade };
   }
-  return __result.value;
 }
 
-function factorial(n: number, acc: number): number {
-  while (true) {
-    if ((n <= 1)) {
-      return acc;
-    } else {
-      if (true) {
-        let __tailrec_n = (n - 1);
-        let __tailrec_acc = (n * acc);
-        n = __tailrec_n;
-        acc = __tailrec_acc;
-        continue;
-      }
+function pair_students(names: string[], grades: number[]): Student[] {
+  return collect(map(zip(names, grades), (entry) => make_student(entry)));
+}
+
+function labeled_range(label: string, items: number[]): [string, [number, number]] {
+  const bounds = min_max(items);
+  return [label, bounds];
+}
+
+function describe_range(data: [string, [number, number]]): string {
+  if (true && true && true) {
+    const label = data[0];
+    const lo = data[1][0];
+    const hi = data[1][1];
+    return ((((label + ": ") + to_text(lo)) + " to ") + to_text(hi));
+  }
+}
+
+function divide(a: number, b: number): { ok: true; value: [number, number] } | { ok: false; error: string } {
+  if (!((b != 0))) return { ok: false, error: "division by zero" };
+  const quotient = (a / b);
+  const remainder = (a % b);
+  return { ok: true, value: [quotient, remainder] };
+}
+
+function format_division(a: number, b: number): { ok: true; value: string } | { ok: false; error: string } {
+  try {
+    const result = __propagateResult(divide(a, b));
+    if (true && true) {
+      const q = result[0];
+      const r = result[1];
+      return { ok: true, value: ((to_text(q) + " remainder ") + to_text(r)) };
     }
-  }
-}
-
-function sum_list(items: number[], acc: number): number {
-  while (true) {
-    if (!((items.length > 0))) return acc;
-    const head = first(items);
-    const tail = skip(items, 1);
-    if (true) {
-      let __tailrec_items = tail;
-      let __tailrec_acc = (acc + head);
-      items = __tailrec_items;
-      acc = __tailrec_acc;
-      continue;
-    }
-  }
-}
-
-function binary_search(items: number[], target: number, low: number, high: number): number | null {
-  while (true) {
-    if (!((low <= high))) return null;
-    const mid = ((low + high) / 2);
-    const value = items.at(mid);
-    if (true && (() => { const v = value; return (v == target); })()) {
-      const v = value;
-      return mid;
-    } else if (true && (() => { const v = value; return (v < target); })()) {
-      const v = value;
-      if (true) {
-        let __tailrec_items = items;
-        let __tailrec_target = target;
-        let __tailrec_low = (mid + 1);
-        let __tailrec_high = high;
-        items = __tailrec_items;
-        target = __tailrec_target;
-        low = __tailrec_low;
-        high = __tailrec_high;
-        continue;
-      }
-    } else if (true) {
-      if (true) {
-        let __tailrec_items = items;
-        let __tailrec_target = target;
-        let __tailrec_low = low;
-        let __tailrec_high = (mid - 1);
-        items = __tailrec_items;
-        target = __tailrec_target;
-        low = __tailrec_low;
-        high = __tailrec_high;
-        continue;
-      }
-    }
+  } catch (__e: unknown) {
+    if (__e && typeof __e === "object" && "__lithoPropagate" in __e) return (__e as { value: unknown }).value;
+    throw __e;
   }
 }

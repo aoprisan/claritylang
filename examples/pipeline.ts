@@ -31,6 +31,69 @@ function panic(message: string): never {
   throw new Error(message);
 }
 
+function split(text: string, delimiter: string): string[] {
+  return text.split(delimiter);
+}
+
+function join(items: string[], delimiter: string): string {
+  return items.join(delimiter);
+}
+
+function trim(text: string): string {
+  return text.trim();
+}
+
+function starts_with(text: string, prefix: string): boolean {
+  return text.startsWith(prefix);
+}
+
+function ends_with(text: string, suffix: string): boolean {
+  return text.endsWith(suffix);
+}
+
+function replace_text(text: string, search: string, replacement: string): string {
+  return text.replaceAll(search, replacement);
+}
+
+function to_upper(text: string): string {
+  return text.toUpperCase();
+}
+
+function to_lower(text: string): string {
+  return text.toLowerCase();
+}
+
+function or_else<T>(value: T | null, fallback: T): T {
+  return value !== null ? value : fallback;
+}
+
+function unwrap_or<T, E>(result: { ok: true; value: T } | { ok: false; error: E }, fallback: T): T {
+  return result.ok ? result.value : fallback;
+}
+
+function now(): Date {
+  return new Date();
+}
+
+function format_date(date: Date, format: string): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return format
+    .replace("YYYY", String(date.getFullYear()))
+    .replace("MM", pad(date.getMonth() + 1))
+    .replace("DD", pad(date.getDate()))
+    .replace("HH", pad(date.getHours()))
+    .replace("mm", pad(date.getMinutes()))
+    .replace("ss", pad(date.getSeconds()));
+}
+
+function add_duration(date: Date, ms: number): Date {
+  return new Date(date.getTime() + ms);
+}
+
+function diff_dates(a: Date, b: Date): number {
+  return a.getTime() - b.getTime();
+}
+
 // --- Litholang Collections ---
 function filter<T>(items: T[], predicate: (item: T) => boolean): T[] {
   return items.filter(predicate);
@@ -153,7 +216,14 @@ function max<T>(items: T[], key?: (item: T) => number): T | number | null {
   return Math.max(...(items as unknown as number[]));
 }
 
-export interface Report {
+interface Sale {
+  date: Date;
+  status: string;
+  category: string;
+  amount: number;
+}
+
+interface Report {
   date: Date;
   total_revenue: number;
   transaction_count: number;
@@ -161,11 +231,41 @@ export interface Report {
   generated_at: Timestamp;
 }
 
-export function daily_report(date: Date): { ok: true; value: Report } | { ok: false; error: Error } {
+function daily_report(date: Date): { ok: true; value: Report } | { ok: false; error: Error } {
   const completed = collect(filter(filter(db.sales, (__it) => (__it.date == date)), (__it) => (__it.status == "completed")));
   const by_category = sort(group(completed, (__it) => __it.category), (__it) => __it.total, descending);
   const total_revenue = sum(completed, (__it) => __it.amount);
   const count = completed.length;
   const report = { date: date, total_revenue: total_revenue, transaction_count: count, by_category: by_category, generated_at: now() };
   return { ok: true, value: report };
+}
+
+function format_line(entry: [number, Sale]): string {
+  if (true && true) {
+    const i = entry[0];
+    const sale = entry[1];
+    return ((((to_text((i + 1)) + ". ") + sale.category) + ": $") + to_text(sale.amount));
+  }
+}
+
+function numbered_receipt(sales: Sale[]): string[] {
+  return collect(map(enumerate(sales), (entry) => format_line(entry)));
+}
+
+function compare_days(today: Sale[], yesterday: Sale[]): [number, number][] {
+  const today_amounts = collect(map(today, (__it) => __it.amount));
+  const yesterday_amounts = collect(map(yesterday, (__it) => __it.amount));
+  return collect(zip(today_amounts, yesterday_amounts));
+}
+
+function compute_delta(pair: [number, number]): number {
+  if (true && true) {
+    const today_amt = pair[0];
+    const yesterday_amt = pair[1];
+    return (today_amt - yesterday_amt);
+  }
+}
+
+function revenue_deltas(pairs: [number, number][]): number[] {
+  return collect(map(pairs, (p) => compute_delta(p)));
 }

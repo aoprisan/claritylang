@@ -31,19 +31,82 @@ function panic(message: string): never {
   throw new Error(message);
 }
 
+function split(text: string, delimiter: string): string[] {
+  return text.split(delimiter);
+}
+
+function join(items: string[], delimiter: string): string {
+  return items.join(delimiter);
+}
+
+function trim(text: string): string {
+  return text.trim();
+}
+
+function starts_with(text: string, prefix: string): boolean {
+  return text.startsWith(prefix);
+}
+
+function ends_with(text: string, suffix: string): boolean {
+  return text.endsWith(suffix);
+}
+
+function replace_text(text: string, search: string, replacement: string): string {
+  return text.replaceAll(search, replacement);
+}
+
+function to_upper(text: string): string {
+  return text.toUpperCase();
+}
+
+function to_lower(text: string): string {
+  return text.toLowerCase();
+}
+
+function or_else<T>(value: T | null, fallback: T): T {
+  return value !== null ? value : fallback;
+}
+
+function unwrap_or<T, E>(result: { ok: true; value: T } | { ok: false; error: E }, fallback: T): T {
+  return result.ok ? result.value : fallback;
+}
+
+function now(): Date {
+  return new Date();
+}
+
+function format_date(date: Date, format: string): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return format
+    .replace("YYYY", String(date.getFullYear()))
+    .replace("MM", pad(date.getMonth() + 1))
+    .replace("DD", pad(date.getDate()))
+    .replace("HH", pad(date.getHours()))
+    .replace("mm", pad(date.getMinutes()))
+    .replace("ss", pad(date.getSeconds()));
+}
+
+function add_duration(date: Date, ms: number): Date {
+  return new Date(date.getTime() + ms);
+}
+
+function diff_dates(a: Date, b: Date): number {
+  return a.getTime() - b.getTime();
+}
+
 function __propagateResult<T, E>(result: { ok: true; value: T } | { ok: false; error: E }): T {
   if (!result.ok) throw { __lithoPropagate: true, value: result };
   return result.value;
 }
 
-export enum Priority {
+enum Priority {
   Critical,
   High,
   Medium,
   Low,
 }
 
-export interface Task {
+interface Task {
   id: string;
   title: string;
   priority: Priority;
@@ -51,14 +114,14 @@ export interface Task {
   estimate: number;
 }
 
-export function validate_task(title: string, estimate: number): { ok: true; value: Task } | { ok: false; error: string } {
+function validate_task(title: string, estimate: number): { ok: true; value: Task } | { ok: false; error: string } {
   if (!((title != ""))) return { ok: false, error: "Title cannot be empty" };
   if (!((estimate > 0))) return { ok: false, error: "Estimate must be positive" };
   const task = { id: generate_id(), title: title, priority: Medium, assignee: null, estimate: estimate };
   return { ok: true, value: task };
 }
 
-export function priority_label(p: Priority): string {
+function priority_label(p: Priority): string {
   if (true) {
     const Critical = p;
     return "CRITICAL";
@@ -74,7 +137,7 @@ export function priority_label(p: Priority): string {
   }
 }
 
-export function estimate_category(task: Task): string {
+function estimate_category(task: Task): string {
   if (true && (() => { const hours = task.estimate; return (hours >= 40); })()) {
     const hours = task.estimate;
     return "epic";
@@ -89,7 +152,7 @@ export function estimate_category(task: Task): string {
   }
 }
 
-export function find_assignee(task: Task): string {
+function find_assignee(task: Task): string {
   if (true && (() => { const name = task.assignee; return (name != ""); })()) {
     const name = task.assignee;
     return name;
@@ -98,13 +161,13 @@ export function find_assignee(task: Task): string {
   }
 }
 
-export function create_task(title: string, estimate: number = 4): { ok: true; value: Task } | { ok: false; error: string } {
+function create_task(title: string, estimate: number = 4): { ok: true; value: Task } | { ok: false; error: string } {
   if (!((title != ""))) return { ok: false, error: "Title is required" };
   const task = { id: generate_id(), title: title, priority: Medium, assignee: null, estimate: estimate };
   return { ok: true, value: task };
 }
 
-export function assign_and_schedule(title: string, assignee: string): { ok: true; value: Task } | { ok: false; error: string } {
+function assign_and_schedule(title: string, assignee: string): { ok: true; value: Task } | { ok: false; error: string } {
   try {
     const task = __propagateResult(create_task(title));
     const updated = { ...task, assignee: assignee };
@@ -116,7 +179,7 @@ export function assign_and_schedule(title: string, assignee: string): { ok: true
   }
 }
 
-export function max_concurrent(p: Priority): number {
+function max_concurrent(p: Priority): number {
   if (true) {
     const Critical = p;
     return 1;
