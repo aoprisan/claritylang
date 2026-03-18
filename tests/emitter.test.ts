@@ -211,7 +211,7 @@ end`);
   });
 
   it("emits export on top-level declarations", () => {
-    const output = compileToTS(`define add(a: Number, b: Number) -> Number as
+    const output = compileToTS(`export define add(a: Number, b: Number) -> Number as
   return a + b
 end`);
 
@@ -219,7 +219,7 @@ end`);
   });
 
   it("emits export on structs", () => {
-    const output = compileToTS(`struct Point has
+    const output = compileToTS(`export struct Point has
   x: Number
   y: Number
 end`);
@@ -228,7 +228,7 @@ end`);
   });
 
   it("emits export on enums", () => {
-    const output = compileToTS(`enum Color is
+    const output = compileToTS(`export enum Color is
   Red
   Green
   Blue
@@ -238,7 +238,7 @@ end`);
   });
 
   it("emits export on type aliases", () => {
-    const output = compileToTS(`type UserId = Number`);
+    const output = compileToTS(`export type UserId = Number`);
     expect(output).toContain("export type UserId");
   });
 
@@ -476,5 +476,163 @@ end`);
 
     expect(output).toContain("while ((n > 0))");
     expect(output).toContain("n = (n - 1);");
+  });
+
+  it("emits text utility functions when used", () => {
+    const output = compileToTS(`define test(s: Text) -> Text as
+  return trim(s)
+end`);
+
+    expect(output).toContain("function trim(text: string): string");
+  });
+
+  it("emits or_else for Maybe fallbacks", () => {
+    const output = compileToTS(`define test(x: Maybe<Number>) -> Number as
+  return or_else(x, 0)
+end`);
+
+    expect(output).toContain("function or_else");
+  });
+
+  it("emits multi-line lambdas as block arrow functions", () => {
+    const output = compileToTS(`define test() -> Void as
+  items = [1, 2, 3]
+  items |> map(each x =>
+    y = x + 1
+    return y
+  end)
+end`);
+
+    expect(output).toContain("(x) => {");
+    expect(output).toContain("const y = (x + 1);");
+    expect(output).toContain("return y;");
+  });
+
+  it("emits union types", () => {
+    const output = compileToTS(`define test(x: Text | Number) -> Void as
+  return undefined
+end`);
+
+    expect(output).toContain("x: string | number");
+  });
+
+  it("emits try-rescue as try-catch", () => {
+    const output = compileToTS(`define test() -> Text as
+  try
+    return "ok"
+  rescue err
+    return "error"
+  end
+end`);
+
+    expect(output).toContain("try {");
+    expect(output).toContain("} catch (err: unknown) {");
+  });
+
+  it("emits list patterns with destructuring", () => {
+    const output = compileToTS(`define test(items: List<Number>) -> Number as
+  match items on
+    case [] => 0
+    case [first, ..rest] => first
+  end
+end`);
+
+    expect(output).toContain("items.length === 0");
+    expect(output).toContain("items.length >= 1");
+    expect(output).toContain("items[0]");
+    expect(output).toContain("items.slice(1)");
+  });
+
+  it("does not export declarations without export keyword", () => {
+    const output = compileToTS(`define add(a: Number, b: Number) -> Number as
+  return a + b
+end`);
+
+    expect(output).not.toContain("export ");
+  });
+
+  it("emits date/time functions when used", () => {
+    const output = compileToTS(`define test() -> Void as
+  t = now()
+  return undefined
+end`);
+
+    expect(output).toContain("function now(): Date");
+  });
+
+  it("emits struct destructuring patterns", () => {
+    const output = compileToTS(`struct User has
+  name: Text
+  age: Number
+end
+
+define greet(u: User) -> Text as
+  match u on
+    case User(name: n) => n
+    case _ => "unknown"
+  end
+end`);
+
+    expect(output).toContain("u.name");
+  });
+});
+
+describe("comprehension emission", () => {
+  it("emits basic comprehension as .map()", () => {
+    const output = compileToTS(`define test(items: List<Number>) -> List<Number> as
+  return for x in items collect x * 2 end
+end`);
+
+    expect(output).toContain("items.map((x) => (x * 2))");
+  });
+
+  it("emits comprehension with where as .filter().map()", () => {
+    const output = compileToTS(`define test(items: List<Number>) -> List<Number> as
+  return for x in items where x > 0 collect x * 2 end
+end`);
+
+    expect(output).toContain(".filter((x) => (x > 0))");
+    expect(output).toContain(".map((x) => (x * 2))");
+  });
+});
+
+describe("relative import emission", () => {
+  it("adds .js extension to relative imports", () => {
+    const output = compileToTS(`import greet from "./utils"`);
+    expect(output).toContain('from "./utils.js"');
+  });
+
+  it("adds .js extension to parent-relative imports", () => {
+    const output = compileToTS(`import helper from "../lib/helpers"`);
+    expect(output).toContain('from "../lib/helpers.js"');
+  });
+
+  it("does not add .js to package imports", () => {
+    const output = compileToTS(`import Hash from "crypto"`);
+    expect(output).toContain('from "crypto"');
+    expect(output).not.toContain('from "crypto.js"');
+  });
+
+  it("does not double-add .js if already present", () => {
+    const output = compileToTS(`import foo from "./bar.js"`);
+    expect(output).toContain('from "./bar.js"');
+    expect(output).not.toContain('from "./bar.js.js"');
+  });
+});
+
+describe("tuple type emission", () => {
+  it("emits Tuple<A, B> as [A, B] in TypeScript", () => {
+    const output = compileToTS(`define test(pair: Tuple<Number, Text>) -> Tuple<Number, Text> as
+  return pair
+end`);
+    expect(output).toContain("pair: [number, string]");
+    expect(output).toContain(": [number, string]");
+  });
+
+  it("emits Tuple<A, B, C> as [A, B, C]", () => {
+    const output = compileToTS(`define test(t: Tuple<Number, Text, Boolean>) -> Void as
+  return
+end`);
+    expect(output).toContain("t: [number, string, boolean]");
   });
 });

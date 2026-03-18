@@ -477,6 +477,39 @@ end`);
     expect(output).toContain("__lithoPropagate");
   });
 
+  it("accepts exhaustive match with or-patterns covering all variants", () => {
+    const errors = check(`enum Color is
+  Red
+  Green
+  Blue
+end
+
+define describe_color(c: Color) -> Text as
+  match c on
+    case Red | Green => return "warm"
+    case Blue => return "cool"
+  end
+end`);
+    expect(errors.length).toBe(0);
+  });
+
+  it("reports missing variants in match with or-patterns", () => {
+    const errors = check(`enum Color is
+  Red
+  Green
+  Blue
+end
+
+define describe_color(c: Color) -> Text as
+  match c on
+    case Red | Green => return "warm"
+  end
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Non-exhaustive match");
+    expect(errors[0].message).toContain("Blue");
+  });
+
   it("does not emit try-catch for functions without propagation", () => {
     const output = compileToTS(`define add(a: Number, b: Number) -> Number as
   return a + b
@@ -484,5 +517,306 @@ end`);
 
     expect(output).not.toContain("try {");
     expect(output).not.toContain("__propagateResult");
+  });
+});
+
+describe("pipeline type inference", () => {
+  it("infers filter preserves list type through pipeline", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Number> as
+  return items |> filter(each x => x > 0)
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects type mismatch when pipeline result differs from return type", () => {
+    const errors = check(`define test(items: List<Number>) -> Text as
+  return items |> filter(each x => x > 0)
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers count returns Number", () => {
+    const errors = check(`define test(items: List<Number>) -> Number as
+  return items |> count()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects mismatch when count result used as Text", () => {
+    const errors = check(`define test(items: List<Number>) -> Text as
+  return items |> count()
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers sum returns Number", () => {
+    const errors = check(`define test(items: List<Number>) -> Number as
+  return items |> sum()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers find returns Maybe", () => {
+    const errors = check(`define test(items: List<Number>) -> Maybe<Number> as
+  return items |> find(each x => x > 10)
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers multi-step pipeline: filter then count", () => {
+    const errors = check(`define test(items: List<Number>) -> Number as
+  return items |> filter(each x => x > 0) |> count()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers join returns Text", () => {
+    const errors = check(`define test(items: List<Text>) -> Text as
+  return items |> join(", ")
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers any_of returns Boolean", () => {
+    const errors = check(`define test(items: List<Number>) -> Boolean as
+  return items |> any_of(each x => x > 0)
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers user-defined pipeline function return type", () => {
+    const errors = check(`define double_all(items: List<Number>) -> List<Number> as
+  return items
+end
+
+define test(items: List<Number>) -> List<Number> as
+  return items |> double_all()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects mismatch with user-defined pipeline function", () => {
+    const errors = check(`define double_all(items: List<Number>) -> List<Number> as
+  return items
+end
+
+define test(items: List<Number>) -> Text as
+  return items |> double_all()
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers sort preserves list type", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Number> as
+  return items |> sort()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers take preserves list type", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Number> as
+  return items |> take(5)
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers first returns Maybe", () => {
+    const errors = check(`define test(items: List<Text>) -> Maybe<Text> as
+  return items |> first()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers reverse preserves list type", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Number> as
+  return items |> reverse()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers split returns List<Text>", () => {
+    const errors = check(`define test(s: Text) -> List<Text> as
+  return s |> split(",")
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers long pipeline: filter -> sort -> take -> count", () => {
+    const errors = check(`define test(items: List<Number>) -> Number as
+  return items |> filter(each x => x > 0) |> sort() |> take(10) |> count()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers pipeline result assigned to variable", () => {
+    const errors = check(`define test(items: List<Number>) -> Number as
+  total = items |> count()
+  return total
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects mismatch on pipeline assigned to variable then returned", () => {
+    const errors = check(`define test(items: List<Number>) -> Text as
+  total = items |> count()
+  return total
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers group returns Map type", () => {
+    const errors = check(`define test(items: List<Number>) -> Void as
+  grouped = items |> group(each x => x)
+  return grouped
+end`);
+    // grouped is Map<unknown, List<Number>> — not Void
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+});
+
+describe("comprehension type inference", () => {
+  it("infers comprehension returns List", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Number> as
+  return for x in items collect x * 2 end
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects mismatch when comprehension body type differs from return type", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Text> as
+  return for x in items collect x * 2 end
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers comprehension with where filter preserves element type check", () => {
+    const errors = check(`define test(items: List<Number>) -> List<Number> as
+  return for x in items where x > 0 collect x end
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects list-vs-primitive mismatch on comprehension result", () => {
+    const errors = check(`define test(items: List<Number>) -> Number as
+  return for x in items collect x end
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+});
+
+describe("tuple type inference", () => {
+  it("accepts Tuple type in function signatures", () => {
+    const errors = check(`define test(pair: Tuple<Number, Text>) -> Tuple<Number, Text> as
+  return pair
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers tuple expression type from elements", () => {
+    const errors = check(`define test() -> Tuple<Number, Text> as
+  return (1, "hello")
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects tuple element type mismatch", () => {
+    const errors = check(`define test() -> Tuple<Number, Number> as
+  return (1, "hello")
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("detects tuple vs primitive mismatch", () => {
+    const errors = check(`define test() -> Number as
+  return (1, 2)
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers enumerate returns List<Tuple<Number, T>>", () => {
+    const errors = check(`define test(items: List<Text>) -> List<Tuple<Number, Text>> as
+  return items |> enumerate()
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers zip returns List<Tuple<T, U>>", () => {
+    const errors = check(`define test(a: List<Number>, b: List<Text>) -> List<Tuple<Number, Text>> as
+  return a |> zip(b)
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects wrong tuple arity", () => {
+    const errors = check(`define test() -> Tuple<Number, Text> as
+  return (1, "hello", true)
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("accepts nested tuple types", () => {
+    const errors = check(`define test() -> Tuple<Number, Tuple<Text, Boolean>> as
+  return (1, ("hello", true))
+end`);
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("tuple pattern matching with type propagation", () => {
+  it("infers types from tuple destructuring in match", () => {
+    const errors = check(`define test(pair: Tuple<Number, Text>) -> Text as
+  match pair on
+    case (n, s) => return s
+  end
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects return type mismatch from destructured tuple variable", () => {
+    const errors = check(`define test(pair: Tuple<Number, Text>) -> Number as
+  match pair on
+    case (n, s) => return s
+  end
+end`);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain("Return type mismatch");
+  });
+
+  it("infers types from nested tuple destructuring", () => {
+    const errors = check(`define test(data: Tuple<Number, Tuple<Text, Boolean>>) -> Text as
+  match data on
+    case (n, (s, b)) => return s
+  end
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("infers types from tuple expression match subject", () => {
+    const errors = check(`define test(x: Number, y: Text) -> Text as
+  match (x, y) on
+    case (n, s) => return s
+  end
+end`);
+    expect(errors).toEqual([]);
+  });
+
+  it("correctly types variables when matching tuple with literals", () => {
+    const errors = check(`define test(pair: Tuple<Number, Text>) -> Text as
+  match pair on
+    case (1, s) => return s
+    case (_, s) => return s
+  end
+end`);
+    expect(errors).toEqual([]);
   });
 });

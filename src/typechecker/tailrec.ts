@@ -145,6 +145,14 @@ function checkStatementForTailCalls(
         checkStatementForTailCalls(s, funcName, false, recursiveCalls, tailCalls);
       }
       break;
+    case "TryRescueStatement":
+      for (const s of stmt.tryBlock) {
+        checkStatementForTailCalls(s, funcName, false, recursiveCalls, tailCalls);
+      }
+      for (const s of stmt.rescueBlock) {
+        checkStatementForTailCalls(s, funcName, false, recursiveCalls, tailCalls);
+      }
+      break;
   }
 }
 

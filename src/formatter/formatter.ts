@@ -72,7 +72,8 @@ export class Formatter {
       .join(", ");
     const returnType = func.returnType ? ` -> ${this.formatType(func.returnType)}` : "";
 
-    lines.push(`${this.pad()}${asyncPrefix}define ${func.name}(${params})${returnType} as`);
+    const exportPrefix = func.isExported ? "export " : "";
+    lines.push(`${this.pad()}${exportPrefix}${asyncPrefix}define ${func.name}(${params})${returnType} as`);
     this.indent++;
     for (const stmt of func.body) {
       lines.push(this.formatStatement(stmt));
@@ -87,7 +88,8 @@ export class Formatter {
     const annots = this.formatAnnotations(struct.annotations);
     if (annots) lines.push(annots.trimEnd());
 
-    lines.push(`${this.pad()}struct ${struct.name} has`);
+    const exportPrefix = struct.isExported ? "export " : "";
+    lines.push(`${this.pad()}${exportPrefix}struct ${struct.name} has`);
     this.indent++;
     for (const field of struct.fields) {
       let line = `${this.pad()}${field.name}: ${this.formatType(field.type)}`;
@@ -108,7 +110,8 @@ export class Formatter {
     const annots = this.formatAnnotations(enumDef.annotations);
     if (annots) lines.push(annots.trimEnd());
 
-    lines.push(`${this.pad()}enum ${enumDef.name} is`);
+    const exportPrefix = enumDef.isExported ? "export " : "";
+    lines.push(`${this.pad()}${exportPrefix}enum ${enumDef.name} is`);
     this.indent++;
     for (const variant of enumDef.variants) {
       if (variant.fields.length === 0) {
@@ -126,7 +129,8 @@ export class Formatter {
   }
 
   private formatTypeAlias(alias: TypeAlias): string {
-    return `${this.pad()}type ${alias.name} = ${this.formatType(alias.type)}`;
+    const exportPrefix = alias.isExported ? "export " : "";
+    return `${this.pad()}${exportPrefix}type ${alias.name} = ${this.formatType(alias.type)}`;
   }
 
   private formatImportDecl(decl: ImportDecl): string {
@@ -229,6 +233,20 @@ export class Formatter {
         lines.push(`${this.pad()}end`);
         return lines.join("\n");
       }
+
+      case "TryRescueStatement": {
+        const lines: string[] = [];
+        lines.push(`${this.pad()}try`);
+        this.indent++;
+        for (const s of stmt.tryBlock) lines.push(this.formatStatement(s));
+        this.indent--;
+        lines.push(`${this.pad()}rescue ${stmt.errorVar}`);
+        this.indent++;
+        for (const s of stmt.rescueBlock) lines.push(this.formatStatement(s));
+        this.indent--;
+        lines.push(`${this.pad()}end`);
+        return lines.join("\n");
+      }
     }
   }
 
@@ -248,6 +266,15 @@ export class Formatter {
           : pattern.name;
       case "OrPattern":
         return pattern.patterns.map(p => this.formatPattern(p)).join(" | ");
+      case "ListPattern": {
+        const elements = pattern.elements.map(e => this.formatPattern(e));
+        if (pattern.rest) elements.push(`..${pattern.rest}`);
+        return `[${elements.join(", ")}]`;
+      }
+      case "StructPattern": {
+        const fields = pattern.fields.map(f => `${f.fieldName}: ${this.formatPattern(f.pattern)}`);
+        return `${pattern.typeName}(${fields.join(", ")})`;
+      }
     }
   }
 
@@ -299,6 +326,15 @@ export class Formatter {
 
       case "LambdaExpr": {
         const params = expr.params.map(p => p.name).join(", ");
+        if (expr.blockBody) {
+          const lines: string[] = [];
+          lines.push(`each ${params} =>`);
+          this.indent++;
+          for (const s of expr.blockBody) lines.push(this.formatStatement(s));
+          this.indent--;
+          lines.push(`${this.pad()}end`);
+          return lines.join("\n");
+        }
         return `each ${params} => ${this.formatExpression(expr.body)}`;
       }
 
@@ -340,6 +376,16 @@ export class Formatter {
 
       case "RangeExpr":
         return `${this.formatExpression(expr.start)}..${this.formatExpression(expr.end)}`;
+
+      case "ComprehensionExpr": {
+        const iterable = this.formatExpression(expr.iterable);
+        const body = this.formatExpression(expr.body);
+        if (expr.filter) {
+          const filter = this.formatExpression(expr.filter);
+          return `for ${expr.variable} in ${iterable} where ${filter} collect ${body} end`;
+        }
+        return `for ${expr.variable} in ${iterable} collect ${body} end`;
+      }
     }
   }
 
@@ -354,6 +400,8 @@ export class Formatter {
         const params = type.params.map(p => this.formatType(p)).join(", ");
         return `(${params}) -> ${this.formatType(type.returnType)}`;
       }
+      case "UnionType":
+        return type.types.map(t => this.formatType(t)).join(" | ");
     }
   }
 }

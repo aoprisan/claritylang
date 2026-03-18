@@ -55,24 +55,45 @@ export class Parser {
   private parseDeclaration(): Declaration {
     const annotations = this.parseAnnotations();
 
+    // Check for `export` visibility modifier
+    let isExported = false;
+    if (this.check(TokenKind.Export)) {
+      isExported = true;
+      this.advance();
+      this.skipNewlines();
+    }
+
     const token = this.current();
+    let decl: Declaration;
     switch (token.kind) {
       case TokenKind.Define:
       case TokenKind.Async:
-        return this.parseFunctionDef(annotations);
+        decl = this.parseFunctionDef(annotations);
+        break;
       case TokenKind.Struct:
-        return this.parseStructDef(annotations);
+        decl = this.parseStructDef(annotations);
+        break;
       case TokenKind.Enum:
-        return this.parseEnumDef(annotations);
+        decl = this.parseEnumDef(annotations);
+        break;
       case TokenKind.Type:
-        return this.parseTypeAlias();
+        decl = this.parseTypeAlias();
+        break;
       case TokenKind.Import:
-        return this.parseImportDecl();
+        decl = this.parseImportDecl();
+        break;
       case TokenKind.Extern:
-        return this.parseExternDef(annotations);
+        decl = this.parseExternDef(annotations);
+        break;
       default:
         throw this.error(`Expected declaration, got '${token.value}'`);
     }
+
+    if (isExported && decl.kind !== "ImportDecl" && decl.kind !== "ExternDef") {
+      (decl as FunctionDef | StructDef | EnumDef | TypeAlias).isExported = true;
+    }
+
+    return decl;
   }
 
   private parseAnnotations(): Annotation[] {
@@ -341,6 +362,7 @@ export class Parser {
 
     const name = this.consume(TokenKind.Identifier, "type name").value;
 
+    let baseType: TypeNode;
     // Generic type: Name<T, U>
     if (this.check(TokenKind.LessThan)) {
       this.advance();
@@ -351,10 +373,22 @@ export class Parser {
         typeArgs.push(this.parseType());
       }
       this.consume(TokenKind.GreaterThan, "'>'");
-      return { kind: "GenericType", name, typeArgs, position: pos };
+      baseType = { kind: "GenericType", name, typeArgs, position: pos };
+    } else {
+      baseType = { kind: "SimpleType", name, position: pos };
     }
 
-    return { kind: "SimpleType", name, position: pos };
+    // Union type: Type | Type | ...
+    if (this.check(TokenKind.Bar)) {
+      const types: TypeNode[] = [baseType];
+      while (this.check(TokenKind.Bar)) {
+        this.advance();
+        types.push(this.parseType());
+      }
+      return { kind: "UnionType", types, position: pos };
+    }
+
+    return baseType;
   }
 
   private parseFunctionType(): TypeNode {
@@ -384,6 +418,7 @@ export class Parser {
       !this.check(TokenKind.End) &&
       !this.check(TokenKind.Else) &&
       !this.check(TokenKind.Case) &&
+      !this.check(TokenKind.Rescue) &&
       !this.check(TokenKind.EOF)
     ) {
       statements.push(this.parseStatement());
@@ -409,6 +444,8 @@ export class Parser {
         return this.parseCheckStatement();
       case TokenKind.Repeat:
         return this.parseRepeatStatement();
+      case TokenKind.Try:
+        return this.parseTryRescueStatement();
       default: {
         // Assignment or expression statement
         // Look ahead: identifier followed by = (but not ==)
@@ -545,7 +582,7 @@ export class Parser {
           stmts.push(this.parseStatement());
           this.skipNewlines();
         }
-        cases.push({ pattern, guard, body: stmts });
+        cases.push({ pattern, ...(guard ? { guard } : {}), body: stmts });
       } else {
         // Could be expression or assignment
         if (
@@ -563,11 +600,11 @@ export class Parser {
             stmts.push(this.parseStatement());
             this.skipNewlines();
           }
-          cases.push({ pattern, guard, body: stmts });
+          cases.push({ pattern, ...(guard ? { guard } : {}), body: stmts });
         } else {
           const expr = this.parseExpression();
           this.skipNewlines();
-          cases.push({ pattern, guard, body: expr });
+          cases.push({ pattern, ...(guard ? { guard } : {}), body: expr });
         }
       }
     }
@@ -610,6 +647,24 @@ export class Parser {
       condition,
       body,
       position: { line: repeatToken.line, column: repeatToken.column },
+    };
+  }
+
+  private parseTryRescueStatement(): Statement {
+    const tryToken = this.consume(TokenKind.Try, "'try'");
+    this.skipNewlines();
+    const tryBlock = this.parseStatementBlock();
+    this.consume(TokenKind.Rescue, "'rescue'");
+    const errorVar = this.consume(TokenKind.Identifier, "error variable").value;
+    this.skipNewlines();
+    const rescueBlock = this.parseStatementBlock();
+    this.consume(TokenKind.End, "'end'");
+    return {
+      kind: "TryRescueStatement",
+      tryBlock,
+      errorVar,
+      rescueBlock,
+      position: { line: tryToken.line, column: tryToken.column },
     };
   }
 
@@ -670,6 +725,28 @@ export class Parser {
       return { kind: "TuplePattern", elements };
     }
 
+    // List pattern: [first, ..rest] or []
+    if (token.kind === TokenKind.LeftBracket) {
+      this.advance();
+      const elements: Pattern[] = [];
+      let rest: string | null = null;
+      if (!this.check(TokenKind.RightBracket)) {
+        elements.push(this.parsePattern());
+        while (this.check(TokenKind.Comma)) {
+          this.advance();
+          // Check for ..rest spread
+          if (this.check(TokenKind.DotDot)) {
+            this.advance();
+            rest = this.consume(TokenKind.Identifier, "rest variable name").value;
+            break;
+          }
+          elements.push(this.parsePattern());
+        }
+      }
+      this.consume(TokenKind.RightBracket, "']'");
+      return { kind: "ListPattern", elements, rest };
+    }
+
     // Literal patterns
     if (token.kind === TokenKind.NumberLiteral) {
       this.advance();
@@ -684,17 +761,36 @@ export class Parser {
       return { kind: "LiteralPattern", value: token.value === "true" };
     }
 
-    // Constructor pattern: Name(inner) or just identifier
+    // Constructor pattern: Name(inner), struct pattern: Name(field: pat, ...), or just identifier
     if (token.kind === TokenKind.Identifier) {
       this.advance();
       if (this.check(TokenKind.LeftParen)) {
         this.advance();
-        let inner: Pattern | null = null;
         if (!this.check(TokenKind.RightParen)) {
-          inner = this.parsePattern();
+          // Check if this is a struct pattern: Name(field: pattern, ...)
+          const saved = this.pos;
+          if (this.check(TokenKind.Identifier) && this.peekToken(1)?.kind === TokenKind.Colon) {
+            // Struct destructuring pattern
+            const fields: { fieldName: string; pattern: Pattern }[] = [];
+            do {
+              const fieldName = this.consume(TokenKind.Identifier, "field name").value;
+              this.consume(TokenKind.Colon, "':'");
+              const pat = this.parsePattern();
+              fields.push({ fieldName, pattern: pat });
+              if (!this.check(TokenKind.Comma)) break;
+              this.advance();
+            } while (true);
+            this.consume(TokenKind.RightParen, "')'");
+            return { kind: "StructPattern", typeName: token.value, fields };
+          }
+          this.pos = saved;
+          // Regular constructor pattern
+          const inner = this.parsePattern();
+          this.consume(TokenKind.RightParen, "')'");
+          return { kind: "ConstructorPattern", name: token.value, inner };
         }
         this.consume(TokenKind.RightParen, "')'");
-        return { kind: "ConstructorPattern", name: token.value, inner };
+        return { kind: "ConstructorPattern", name: token.value, inner: null };
       }
       return { kind: "IdentifierPattern", name: token.value };
     }
@@ -1079,16 +1175,40 @@ export class Parser {
       return first;
     }
 
-    // Lambda: each x => expr
+    // Lambda: each x => expr OR each x =>\n  stmts\n end
     if (token.kind === TokenKind.Each) {
       this.advance();
       const params: Parameter[] = [];
+      // Parse comma-separated params
       const paramName = this.consume(TokenKind.Identifier, "parameter name");
       params.push({
         name: paramName.value,
         type: { kind: "SimpleType", name: "Any", position: { line: paramName.line, column: paramName.column } },
       });
+      while (this.check(TokenKind.Comma)) {
+        this.advance();
+        const nextParam = this.consume(TokenKind.Identifier, "parameter name");
+        params.push({
+          name: nextParam.value,
+          type: { kind: "SimpleType", name: "Any", position: { line: nextParam.line, column: nextParam.column } },
+        });
+      }
       this.consume(TokenKind.FatArrow, "'=>'");
+      // Multi-line lambda: each x =>\n  body\nend
+      if (this.check(TokenKind.Newline)) {
+        this.skipNewlines();
+        const blockBody = this.parseStatementBlock();
+        this.consume(TokenKind.End, "'end'");
+        // Use the last expression as the body placeholder
+        const placeholder: Expression = { kind: "IdentifierExpr", name: "undefined", position: this.position() };
+        return {
+          kind: "LambdaExpr",
+          params,
+          body: placeholder,
+          blockBody,
+          position: { line: token.line, column: token.column },
+        };
+      }
       const body = this.parseExpression();
       return {
         kind: "LambdaExpr",
@@ -1147,6 +1267,41 @@ export class Parser {
       return {
         kind: "IdentifierExpr",
         name: token.value,
+        position: { line: token.line, column: token.column },
+      };
+    }
+
+    // Comprehension: for x in items collect expr end
+    // or: for x in items where cond collect expr end
+    if (token.kind === TokenKind.For) {
+      this.advance();
+      const variable = this.consume(TokenKind.Identifier, "loop variable").value;
+      this.consume(TokenKind.In, "'in'");
+      const iterable = this.parseExpression();
+
+      // Optional where clause
+      let filter: Expression | undefined;
+      if (this.check(TokenKind.Where)) {
+        this.advance();
+        filter = this.parseExpression();
+      }
+
+      // Expect "collect" identifier
+      const collectToken = this.current();
+      if (collectToken.kind !== TokenKind.Identifier || collectToken.value !== "collect") {
+        throw this.error(`Expected 'collect' in comprehension, got '${collectToken.value}'`);
+      }
+      this.advance();
+
+      const body = this.parseExpression();
+      this.consume(TokenKind.End, "'end'");
+
+      return {
+        kind: "ComprehensionExpr",
+        variable,
+        iterable,
+        filter,
+        body,
         position: { line: token.line, column: token.column },
       };
     }

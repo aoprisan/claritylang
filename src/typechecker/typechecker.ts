@@ -21,6 +21,7 @@ export type LithoType =
   | { kind: "set"; element: LithoType }
   | { kind: "maybe"; inner: LithoType }
   | { kind: "result"; ok: LithoType; error: LithoType }
+  | { kind: "tuple"; elements: LithoType[] }
   | { kind: "function"; params: LithoType[]; returnType: LithoType }
   | { kind: "struct"; name: string; fields: Map<string, LithoType> }
   | { kind: "enum"; name: string; variants: string[] }
@@ -276,8 +277,8 @@ export class TypeChecker {
         const subjectType = this.inferExpression(stmt.subject, scope);
         for (const matchCase of stmt.cases) {
           const caseScope = createScope(scope);
-          // Bind pattern identifiers
-          this.bindPattern(matchCase.pattern, caseScope);
+          // Bind pattern identifiers with types from subject
+          this.bindPattern(matchCase.pattern, caseScope, subjectType);
           // Type check guard expression
           if (matchCase.guard) {
             this.inferExpression(matchCase.guard, caseScope);
@@ -309,20 +310,33 @@ export class TypeChecker {
         for (const s of stmt.body) this.checkStatement(s, scope, declaredReturn, functionName);
         break;
       }
+
+      case "TryRescueStatement": {
+        const tryScope = createScope(scope);
+        for (const s of stmt.tryBlock) this.checkStatement(s, tryScope, declaredReturn, functionName);
+        const rescueScope = createScope(scope);
+        rescueScope.variables.set(stmt.errorVar, { kind: "unknown" });
+        for (const s of stmt.rescueBlock) this.checkStatement(s, rescueScope, declaredReturn, functionName);
+        break;
+      }
     }
   }
 
   private bindPattern(
     pattern: import("../parser/ast.js").Pattern,
     scope: Scope,
+    matchedType?: LithoType,
   ): void {
     switch (pattern.kind) {
       case "IdentifierPattern":
-        scope.variables.set(pattern.name, { kind: "unknown" });
+        scope.variables.set(pattern.name, matchedType ?? { kind: "unknown" });
         break;
       case "TuplePattern":
-        for (const el of pattern.elements) {
-          this.bindPattern(el, scope);
+        for (let i = 0; i < pattern.elements.length; i++) {
+          const elType = matchedType?.kind === "tuple" && i < matchedType.elements.length
+            ? matchedType.elements[i]
+            : undefined;
+          this.bindPattern(pattern.elements[i], scope, elType);
         }
         break;
       case "ConstructorPattern":
@@ -332,7 +346,24 @@ export class TypeChecker {
         break;
       case "OrPattern":
         for (const p of pattern.patterns) {
-          this.bindPattern(p, scope);
+          this.bindPattern(p, scope, matchedType);
+        }
+        break;
+      case "ListPattern":
+        for (const el of pattern.elements) {
+          const elType = matchedType?.kind === "list" ? matchedType.element : undefined;
+          this.bindPattern(el, scope, elType);
+        }
+        if (pattern.rest) {
+          scope.variables.set(pattern.rest, matchedType?.kind === "list" ? matchedType : { kind: "unknown" });
+        }
+        break;
+      case "StructPattern":
+        for (const f of pattern.fields) {
+          const fieldType = matchedType?.kind === "struct"
+            ? matchedType.fields.get(f.fieldName)
+            : undefined;
+          this.bindPattern(f.pattern, scope, fieldType);
         }
         break;
       default:
@@ -346,6 +377,14 @@ export class TypeChecker {
         return { kind: "primitive", name: "Number" };
 
       case "TextLiteral":
+        // Type-check interpolation expressions
+        if (expr.segments) {
+          for (const seg of expr.segments) {
+            if ("expr" in seg) {
+              this.inferExpression(seg.expr, scope);
+            }
+          }
+        }
         return { kind: "primitive", name: "Text" };
 
       case "BooleanLiteral":
@@ -484,14 +523,15 @@ export class TypeChecker {
       }
 
       case "PipelineExpr": {
-        this.inferExpression(expr.source, scope);
+        let currentType = this.inferExpression(expr.source, scope);
         for (const step of expr.steps) {
           this.inferExpression(step.callee, scope);
           for (const arg of step.args) {
             this.inferExpression(arg.value, scope);
           }
+          currentType = this.inferPipelineStep(currentType, step, scope);
         }
-        return { kind: "unknown" };
+        return currentType;
       }
 
       case "LambdaExpr": {
@@ -501,6 +541,23 @@ export class TypeChecker {
         }
         this.inferExpression(expr.body, lambdaScope);
         return { kind: "unknown" };
+      }
+
+      case "ComprehensionExpr": {
+        const iterableType = this.inferExpression(expr.iterable, scope);
+        const elementType: LithoType =
+          iterableType.kind === "list" ? iterableType.element : { kind: "unknown" };
+
+        // Create scope with loop variable bound to element type
+        const compScope = createScope(scope);
+        compScope.variables.set(expr.variable, elementType);
+
+        if (expr.filter) {
+          this.inferExpression(expr.filter, compScope);
+        }
+
+        const bodyType = this.inferExpression(expr.body, compScope);
+        return { kind: "list", element: bodyType };
       }
 
       case "PropagateExpr": {
@@ -596,16 +653,14 @@ export class TypeChecker {
       }
 
       case "TupleExpr": {
-        for (const el of expr.elements) {
-          this.inferExpression(el, scope);
-        }
-        return { kind: "unknown" };
+        const elements = expr.elements.map(el => this.inferExpression(el, scope));
+        return { kind: "tuple", elements };
       }
 
       case "RangeExpr": {
         this.inferExpression(expr.start, scope);
         this.inferExpression(expr.end, scope);
-        return { kind: "list", element: { kind: "number" } };
+        return { kind: "list", element: { kind: "primitive", name: "Number" } };
       }
     }
   }
@@ -653,7 +708,7 @@ export class TypeChecker {
       }
       case "GenericType": {
         const builtinGenerics = new Set([
-          "List", "Map", "Set", "Maybe", "Result",
+          "List", "Map", "Set", "Maybe", "Result", "Tuple",
         ]);
         if (!builtinGenerics.has(type.name) && !this.typeAliases.has(type.name)) {
           this.addError(`Unknown generic type '${type.name}'`, type.position);
@@ -670,6 +725,11 @@ export class TypeChecker {
         this.validateTypeNode(type.returnType);
         break;
       }
+      case "UnionType":
+        for (const t of type.types) {
+          this.validateTypeNode(t);
+        }
+        break;
     }
   }
 
@@ -721,6 +781,12 @@ export class TypeChecker {
             error: this.resolveTypeNode(type.typeArgs[1]),
           };
         }
+        if (type.name === "Tuple" && type.typeArgs.length >= 2) {
+          return {
+            kind: "tuple",
+            elements: type.typeArgs.map(a => this.resolveTypeNode(a)),
+          };
+        }
         return { kind: "named", name: type.name };
       }
       case "FunctionType": {
@@ -730,6 +796,8 @@ export class TypeChecker {
           returnType: this.resolveTypeNode(type.returnType),
         };
       }
+      case "UnionType":
+        return { kind: "unknown" };
     }
   }
 
@@ -765,6 +833,12 @@ export class TypeChecker {
       return source.name === target.name;
     }
 
+    // Tuple assignability (element-wise covariant)
+    if (source.kind === "tuple" && target.kind === "tuple") {
+      if (source.elements.length !== target.elements.length) return false;
+      return source.elements.every((el, i) => this.isAssignable(el, target.elements[i]));
+    }
+
     // Result/Maybe
     if (source.kind === "result" && target.kind === "result") {
       return this.isAssignable(source.ok, target.ok) &&
@@ -779,6 +853,23 @@ export class TypeChecker {
       return source.kind === "primitive" && source.name === "Void";
     }
 
+    // If both types are concrete but different kinds, check for known incompatibilities.
+    // We only reject clear mismatches to avoid false positives with Result/Maybe wrapping.
+    if (source.kind !== target.kind) {
+      // A list is never a primitive and vice versa
+      if (source.kind === "list" && target.kind === "primitive") return false;
+      if (source.kind === "primitive" && target.kind === "list") return false;
+      // A map is never a primitive and vice versa
+      if (source.kind === "map" && target.kind === "primitive") return false;
+      if (source.kind === "primitive" && target.kind === "map") return false;
+      // A list is never a map and vice versa
+      if (source.kind === "list" && target.kind === "map") return false;
+      if (source.kind === "map" && target.kind === "list") return false;
+      // A tuple is never a primitive and vice versa
+      if (source.kind === "tuple" && target.kind === "primitive") return false;
+      if (source.kind === "primitive" && target.kind === "tuple") return false;
+    }
+
     return true; // default: don't block on uncertain types
   }
 
@@ -790,6 +881,7 @@ export class TypeChecker {
       case "set": return `Set<${this.typeToString(type.element)}>`;
       case "maybe": return `Maybe<${this.typeToString(type.inner)}>`;
       case "result": return `Result<${this.typeToString(type.ok)}, ${this.typeToString(type.error)}>`;
+      case "tuple": return `Tuple<${type.elements.map(e => this.typeToString(e)).join(", ")}>`;
       case "function": return `(${type.params.map(p => this.typeToString(p)).join(", ")}) -> ${this.typeToString(type.returnType)}`;
       case "struct": return type.name;
       case "enum": return type.name;
@@ -817,16 +909,22 @@ export class TypeChecker {
 
     // Collect covered variants from unguarded patterns
     const coveredVariants = new Set<string>();
+    const collectVariantsFromPattern = (pattern: import("../parser/ast.js").Pattern): void => {
+      if (pattern.kind === "ConstructorPattern") {
+        coveredVariants.add(pattern.name);
+      } else if (pattern.kind === "IdentifierPattern" && allVariants.has(pattern.name)) {
+        coveredVariants.add(pattern.name);
+      } else if (pattern.kind === "LiteralPattern" && typeof pattern.value === "string") {
+        coveredVariants.add(pattern.value);
+      } else if (pattern.kind === "OrPattern") {
+        for (const sub of pattern.patterns) {
+          collectVariantsFromPattern(sub);
+        }
+      }
+    };
     for (const matchCase of stmt.cases) {
       if (matchCase.guard) continue; // guarded cases don't guarantee coverage
-      if (matchCase.pattern.kind === "ConstructorPattern") {
-        coveredVariants.add(matchCase.pattern.name);
-      } else if (matchCase.pattern.kind === "IdentifierPattern" && allVariants.has(matchCase.pattern.name)) {
-        // Bare identifier that matches a variant name
-        coveredVariants.add(matchCase.pattern.name);
-      } else if (matchCase.pattern.kind === "LiteralPattern" && typeof matchCase.pattern.value === "string") {
-        coveredVariants.add(matchCase.pattern.value);
-      }
+      collectVariantsFromPattern(matchCase.pattern);
     }
 
     const missingVariants = subjectType.variants.filter(
@@ -839,6 +937,192 @@ export class TypeChecker {
         stmt.position,
       );
     }
+  }
+
+  /**
+   * Infer the output type of a single pipeline step given the input type.
+   * In a pipeline `a |> f(b)`, the source `a` is passed as the first argument
+   * to `f`, so we resolve the return type based on knowledge of built-in
+   * collection/prelude functions and user-defined functions.
+   */
+  private inferPipelineStep(
+    inputType: LithoType,
+    step: import("../parser/ast.js").PipelineStep,
+    scope: Scope,
+  ): LithoType {
+    const calleeName =
+      step.callee.kind === "IdentifierExpr" ? step.callee.name : null;
+
+    if (!calleeName) return { kind: "unknown" };
+
+    // Extract the element type from a list input (used by most collection fns)
+    const elementType: LithoType =
+      inputType.kind === "list" ? inputType.element : { kind: "unknown" };
+
+    // Built-in collection functions that preserve the element type
+    const preservesList = new Set([
+      "filter", "take", "skip", "sort", "reverse", "unique", "collect",
+    ]);
+    if (preservesList.has(calleeName)) {
+      if (inputType.kind === "list") {
+        return inputType;
+      }
+      return { kind: "list", element: { kind: "unknown" } };
+    }
+
+    // map: List<T> -> List<U> where U is the lambda return type
+    if (calleeName === "map") {
+      if (step.args.length >= 1) {
+        const lambdaArg = step.args[0].value;
+        if (lambdaArg.kind === "LambdaExpr") {
+          const lambdaScope = createScope(scope);
+          // Bind lambda param to element type if available
+          for (const param of lambdaArg.params) {
+            const paramType = this.resolveTypeNode(param.type);
+            lambdaScope.variables.set(
+              param.name,
+              paramType.kind === "unknown" ? elementType : paramType,
+            );
+          }
+          const bodyType = this.inferExpression(lambdaArg.body, lambdaScope);
+          return { kind: "list", element: bodyType };
+        }
+      }
+      return { kind: "list", element: { kind: "unknown" } };
+    }
+
+    // flat_map: List<T> -> List<U> (flattened)
+    if (calleeName === "flat_map") {
+      if (step.args.length >= 1) {
+        const lambdaArg = step.args[0].value;
+        if (lambdaArg.kind === "LambdaExpr") {
+          const lambdaScope = createScope(scope);
+          for (const param of lambdaArg.params) {
+            const paramType = this.resolveTypeNode(param.type);
+            lambdaScope.variables.set(
+              param.name,
+              paramType.kind === "unknown" ? elementType : paramType,
+            );
+          }
+          const bodyType = this.inferExpression(lambdaArg.body, lambdaScope);
+          // flat_map unwraps one level of list
+          if (bodyType.kind === "list") {
+            return bodyType;
+          }
+          return { kind: "list", element: bodyType };
+        }
+      }
+      return { kind: "list", element: { kind: "unknown" } };
+    }
+
+    // reduce: List<T> -> U (type of initial value)
+    if (calleeName === "reduce") {
+      // reduce(fn, initial) — initial is the second extra arg (index 1)
+      if (step.args.length >= 2) {
+        return this.inferExpression(step.args[1].value, scope);
+      }
+      return { kind: "unknown" };
+    }
+
+    // find, first, last: List<T> -> Maybe<T>
+    if (calleeName === "find" || calleeName === "first" || calleeName === "last") {
+      return { kind: "maybe", inner: elementType };
+    }
+
+    // count, length: List<T> -> Number
+    if (calleeName === "count" || calleeName === "length") {
+      return { kind: "primitive", name: "Number" };
+    }
+
+    // sum: List<Number> -> Number
+    if (calleeName === "sum") {
+      return { kind: "primitive", name: "Number" };
+    }
+
+    // min, max: List<Number> -> Maybe<Number>, or List<T> -> Maybe<T>
+    if (calleeName === "min" || calleeName === "max") {
+      return { kind: "maybe", inner: elementType };
+    }
+
+    // any_of, all_of, none_of: List<T> -> Boolean
+    if (calleeName === "any_of" || calleeName === "all_of" || calleeName === "none_of") {
+      return { kind: "primitive", name: "Boolean" };
+    }
+
+    // enumerate: List<T> -> List<Tuple<Number, T>>
+    if (calleeName === "enumerate") {
+      return {
+        kind: "list",
+        element: { kind: "tuple", elements: [{ kind: "primitive", name: "Number" }, elementType] },
+      };
+    }
+
+    // zip: List<T> |> zip(List<U>) -> List<Tuple<T, U>>
+    if (calleeName === "zip") {
+      let secondElementType: LithoType = { kind: "unknown" };
+      if (step.args.length >= 1) {
+        const argType = this.inferExpression(step.args[0].value, scope);
+        if (argType.kind === "list") {
+          secondElementType = argType.element;
+        }
+      }
+      return {
+        kind: "list",
+        element: { kind: "tuple", elements: [elementType, secondElementType] },
+      };
+    }
+
+    // group: List<T> -> Map<K, List<T>>
+    if (calleeName === "group") {
+      return { kind: "map", key: { kind: "unknown" }, value: { kind: "list", element: elementType } };
+    }
+
+    // join: List<Text> -> Text
+    if (calleeName === "join") {
+      return { kind: "primitive", name: "Text" };
+    }
+
+    // String functions that return Text
+    const textToText = new Set([
+      "trim", "to_upper", "to_lower", "replace_text",
+    ]);
+    if (textToText.has(calleeName)) {
+      return { kind: "primitive", name: "Text" };
+    }
+
+    // String functions that return Boolean
+    if (calleeName === "starts_with" || calleeName === "ends_with") {
+      return { kind: "primitive", name: "Boolean" };
+    }
+
+    // split: Text -> List<Text>
+    if (calleeName === "split") {
+      return { kind: "list", element: { kind: "primitive", name: "Text" } };
+    }
+
+    // to_text: any -> Text
+    if (calleeName === "to_text") {
+      return { kind: "primitive", name: "Text" };
+    }
+
+    // to_number: any -> Number
+    if (calleeName === "to_number") {
+      return { kind: "primitive", name: "Number" };
+    }
+
+    // print: any -> Void
+    if (calleeName === "print") {
+      return { kind: "primitive", name: "Void" };
+    }
+
+    // User-defined functions: look up return type
+    // In a pipeline, the piped value is the first arg, so arg count is step.args.length + 1
+    const func = this.functions.get(calleeName);
+    if (func && func.returnType) {
+      return this.resolveTypeNode(func.returnType);
+    }
+
+    return { kind: "unknown" };
   }
 
   private addError(message: string, position: Position): void {

@@ -594,4 +594,179 @@ end`);
       }
     }
   });
+
+  it("parses multi-line lambdas", () => {
+    const ast = parse(`define test() -> Void as
+  items = [1, 2, 3]
+  items |> map(each x =>
+    y = x + 1
+    return y
+  end)
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const assign = func.body[1];
+      if (assign.kind === "ExpressionStatement" && assign.expr.kind === "PipelineExpr") {
+        const step = assign.expr.steps[0];
+        const lambda = step.args[0].value;
+        if (lambda.kind === "LambdaExpr") {
+          expect(lambda.blockBody).toBeDefined();
+          expect(lambda.blockBody).toHaveLength(2);
+        }
+      }
+    }
+  });
+
+  it("parses union types", () => {
+    const ast = parse(`define test(x: Text | Number) -> Void as
+  return undefined
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      expect(func.params[0].type.kind).toBe("UnionType");
+    }
+  });
+
+  it("parses try-rescue statement", () => {
+    const ast = parse(`define test() -> Text as
+  try
+    return "ok"
+  rescue err
+    return "error"
+  end
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      expect(func.body[0].kind).toBe("TryRescueStatement");
+    }
+  });
+
+  it("parses list patterns", () => {
+    const ast = parse(`define test(items: List<Number>) -> Number as
+  match items on
+    case [] => 0
+    case [first, ..rest] => first
+  end
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const match = func.body[0];
+      if (match.kind === "MatchStatement") {
+        expect(match.cases[0].pattern.kind).toBe("ListPattern");
+        expect(match.cases[1].pattern.kind).toBe("ListPattern");
+        if (match.cases[1].pattern.kind === "ListPattern") {
+          expect(match.cases[1].pattern.rest).toBe("rest");
+        }
+      }
+    }
+  });
+
+  it("parses struct destructuring patterns", () => {
+    const ast = parse(`define test(u: User) -> Text as
+  match u on
+    case User(name: n, age: a) => n
+    case _ => "unknown"
+  end
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const match = func.body[0];
+      if (match.kind === "MatchStatement") {
+        expect(match.cases[0].pattern.kind).toBe("StructPattern");
+      }
+    }
+  });
+
+  it("parses export keyword on function", () => {
+    const ast = parse(`export define greet(name: Text) -> Text as
+  return "Hello"
+end`);
+
+    expect(ast.declarations).toHaveLength(1);
+    const func = ast.declarations[0];
+    expect(func.kind).toBe("FunctionDef");
+    if (func.kind === "FunctionDef") {
+      expect(func.isExported).toBe(true);
+    }
+  });
+
+  it("parses export keyword on struct", () => {
+    const ast = parse(`export struct Point has
+  x: Number
+  y: Number
+end`);
+
+    const decl = ast.declarations[0];
+    expect(decl.kind).toBe("StructDef");
+    if (decl.kind === "StructDef") {
+      expect(decl.isExported).toBe(true);
+    }
+  });
+
+  it("parses declarations without export as non-exported", () => {
+    const ast = parse(`define add(a: Number, b: Number) -> Number as
+  return a + b
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      expect(func.isExported).toBeUndefined();
+    }
+  });
+});
+
+describe("comprehension expressions", () => {
+  it("parses basic comprehension", () => {
+    const ast = parse(`define test(items: List<Number>) -> List<Number> as
+  return for x in items collect x * 2 end
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const ret = func.body[0];
+      if (ret.kind === "ReturnStatement") {
+        expect(ret.value.kind).toBe("ComprehensionExpr");
+        if (ret.value.kind === "ComprehensionExpr") {
+          expect(ret.value.variable).toBe("x");
+          expect(ret.value.filter).toBeUndefined();
+        }
+      }
+    }
+  });
+
+  it("parses comprehension with where filter", () => {
+    const ast = parse(`define test(items: List<Number>) -> List<Number> as
+  return for x in items where x > 0 collect x * 2 end
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const ret = func.body[0];
+      if (ret.kind === "ReturnStatement" && ret.value.kind === "ComprehensionExpr") {
+        expect(ret.value.variable).toBe("x");
+        expect(ret.value.filter).toBeDefined();
+        expect(ret.value.filter!.kind).toBe("BinaryExpr");
+      }
+    }
+  });
+
+  it("parses comprehension assigned to variable", () => {
+    const ast = parse(`define test(items: List<Number>) -> List<Number> as
+  doubled = for x in items collect x * 2 end
+  return doubled
+end`);
+
+    const func = ast.declarations[0];
+    if (func.kind === "FunctionDef") {
+      const assign = func.body[0];
+      if (assign.kind === "Assignment") {
+        expect(assign.value.kind).toBe("ComprehensionExpr");
+      }
+    }
+  });
 });

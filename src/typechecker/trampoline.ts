@@ -202,6 +202,10 @@ function findNonTailInStatement(
       findNonTailInExpr(stmt.condition, groupNames, false, nonTailCalls);
       for (const s of stmt.body) findNonTailInStatement(s, groupNames, false, nonTailCalls);
       break;
+    case "TryRescueStatement":
+      for (const s of stmt.tryBlock) findNonTailInStatement(s, groupNames, false, nonTailCalls);
+      for (const s of stmt.rescueBlock) findNonTailInStatement(s, groupNames, false, nonTailCalls);
+      break;
   }
 }
 

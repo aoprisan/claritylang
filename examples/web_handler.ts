@@ -31,6 +31,69 @@ function panic(message: string): never {
   throw new Error(message);
 }
 
+function split(text: string, delimiter: string): string[] {
+  return text.split(delimiter);
+}
+
+function join(items: string[], delimiter: string): string {
+  return items.join(delimiter);
+}
+
+function trim(text: string): string {
+  return text.trim();
+}
+
+function starts_with(text: string, prefix: string): boolean {
+  return text.startsWith(prefix);
+}
+
+function ends_with(text: string, suffix: string): boolean {
+  return text.endsWith(suffix);
+}
+
+function replace_text(text: string, search: string, replacement: string): string {
+  return text.replaceAll(search, replacement);
+}
+
+function to_upper(text: string): string {
+  return text.toUpperCase();
+}
+
+function to_lower(text: string): string {
+  return text.toLowerCase();
+}
+
+function or_else<T>(value: T | null, fallback: T): T {
+  return value !== null ? value : fallback;
+}
+
+function unwrap_or<T, E>(result: { ok: true; value: T } | { ok: false; error: E }, fallback: T): T {
+  return result.ok ? result.value : fallback;
+}
+
+function now(): Date {
+  return new Date();
+}
+
+function format_date(date: Date, format: string): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return format
+    .replace("YYYY", String(date.getFullYear()))
+    .replace("MM", pad(date.getMonth() + 1))
+    .replace("DD", pad(date.getDate()))
+    .replace("HH", pad(date.getHours()))
+    .replace("mm", pad(date.getMinutes()))
+    .replace("ss", pad(date.getSeconds()));
+}
+
+function add_duration(date: Date, ms: number): Date {
+  return new Date(date.getTime() + ms);
+}
+
+function diff_dates(a: Date, b: Date): number {
+  return a.getTime() - b.getTime();
+}
+
 // --- Litholang Collections ---
 function filter<T>(items: T[], predicate: (item: T) => boolean): T[] {
   return items.filter(predicate);
@@ -160,29 +223,29 @@ function __propagateResult<T, E>(result: { ok: true; value: T } | { ok: false; e
 
 import { Hash } from "crypto";
 
-export interface NewUser {
+interface NewUser {
   email: string;
   password: string;
   name: string;
 }
 
-export interface UserResponse {
+interface UserResponse {
   id: string;
   email: string;
   name: string;
   created_at: Timestamp;
 }
 
-export interface HttpRequest {
+interface HttpRequest {
   body: string;
 }
 
-export interface HttpResponse {
+interface HttpResponse {
   status: number;
   body: string;
 }
 
-export function handle_register(request: HttpRequest): { ok: true; value: HttpResponse } | { ok: false; error: string } {
+function handle_register(request: HttpRequest): { ok: true; value: HttpResponse } | { ok: false; error: string } {
   try {
     const body = __propagateResult(request.parse_json());
     if (!((body.email != ""))) return { ok: false, error: "Invalid email" };
@@ -197,14 +260,14 @@ export function handle_register(request: HttpRequest): { ok: true; value: HttpRe
   }
 }
 
-export function find_user_by_email(email: string): UserResponse | null {
+function find_user_by_email(email: string): UserResponse | null {
   const user = db.users.find_one(email);
   if (!((user != null))) return null;
   const result = { id: user.id, email: user.email, name: user.name, created_at: user.created_at };
   return result;
 }
 
-export function list_users(page: number = 1, page_size: number = 20): UserResponse[] {
+function list_users(page: number = 1, page_size: number = 20): UserResponse[] {
   const offset = ((page - 1) * page_size);
   return collect(take(skip(db.users.find_all(), offset), page_size));
 }
